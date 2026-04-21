@@ -1,0 +1,18 @@
+[package]
+name = "fd-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CLI verifier and replay tool for Fard Dinar"
+
+[[bin]]
+name = "fardverify"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+fd-core = { path = "../fd-core" }
+serde.workspace = true
+serde_json.workspace = true
+walkdir.workspace = true
