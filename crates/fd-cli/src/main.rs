@@ -220,7 +220,7 @@ fn main() -> Result<()> {
                         Ok(result) => {
                             state = result.state;
 
-                            let receipt_path = receipts.join(format!("{}.json", result.receipt.run_id.replace("sha256:", "")));
+                            let receipt_path = receipts.join(format!("{}.json", result.receipt.run_id.replace("ahd1024:", "")));
                             std::fs::write(&receipt_path, serde_json::to_string_pretty(&result.receipt)?)
                                 .with_context(|| format!("failed to write {}", receipt_path.display()))?;
 

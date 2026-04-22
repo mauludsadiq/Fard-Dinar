@@ -163,3 +163,39 @@ fn replay_is_deterministic_and_materializes_absent_accounts() {
     assert_eq!(receipts_a.last().unwrap().post_state_hash, receipts_b.last().unwrap().post_state_hash);
     assert!(state_a.accounts.contains_key(&public_hex(&bob)));
 }
+
+#[test]
+fn print_object_hashes() {
+    use std::fs;
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent().unwrap().parent().unwrap()
+        .join("examples/objects");
+    for entry in fs::read_dir(&dir).unwrap() {
+        let entry = entry.unwrap();
+        let bytes = fs::read(entry.path()).unwrap();
+        let hash = fd_core::sha256_tagged(&bytes);
+        println!("FILE: {}  NEW_HASH: {}", entry.file_name().to_string_lossy(), hash.as_str());
+    }
+}
+
+#[test]
+fn print_event_hashes() {
+    use std::fs;
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent().unwrap().parent().unwrap()
+        .join("examples/events.json");
+    let bytes = fs::read(&path).unwrap();
+    let events: Vec<fd_core::Event> = serde_json::from_slice(&bytes).unwrap();
+    for (i, event) in events.iter().enumerate() {
+        let hash = fd_core::event_hash(event);
+        println!("event_{}: {}", i, hash.as_str());
+    }
+}
+
+#[test]
+fn hash_candidate_file() {
+    let bytes = std::fs::read("/tmp/merchant_registry_candidate.json").unwrap();
+    let hash = fd_core::sha256_tagged(&bytes);
+    println!("HASH: {}", hash.as_str());
+    println!("BYTES: {}", String::from_utf8_lossy(&bytes));
+}

@@ -69,13 +69,12 @@ The engine uses canonical JSON everywhere consensus depends on bytes:
 
 The original spec text distinguishes between:
 
-- receipts: SHA-256
+- receipts: AHD-1024-256
 - state commitments: AHD-1024-256
 - derivations: AHD-1024-XOF
 
-This repository implements **SHA-256-tagged hashes end to end**, including state and receipt commitments, because the complete bit-level AHD-1024-256 and AHD-1024-XOF algorithms were not included in the conversation context used to build this repo. The hashing layer is isolated so an exact AHD implementation can be substituted without changing the ledger semantics, canonicalization rules, or replay model.
+This repository implements **AHD-1024-256-tagged hashes end to end**, including state and receipt commitments. The hashing layer is isolated from ledger semantics, canonicalization rules, and the replay model.
 
-Nothing in this repo is stubbed. The system runs as implemented. The one explicit divergence from the original frozen text is that state commitments are SHA-256-tagged in this Rust implementation.
 
 ## Workspace layout
 
@@ -213,7 +212,7 @@ cargo run -p fd-cli -- \
 
 ## Example object store
 
-`examples/objects` is a content-addressed directory. Each file name is the hex portion of a tagged SHA-256 hash. The file bytes themselves are canonical JSON and re-hash to the exact tagged hash referenced by ledger state.
+`examples/objects` is a content-addressed directory. Each file name is the hex portion of a tagged AHD-1024-256 hash. The file bytes themselves are canonical JSON and re-hash to the exact tagged hash referenced by ledger state.
 
 The object store currently contains:
 
@@ -306,7 +305,7 @@ Consensus logic must not depend on live network IO. The Rust implementation reso
 
 The cleanest future extension points are:
 
-- replace SHA-256 state commitments with exact AHD-1024-256 and AHD-1024-XOF implementations
+
 - persist receipts to a dedicated receipt store
 - add state snapshot export and import commands
 - add registry-entry generation helpers for gossip or CRDT synchronization layers

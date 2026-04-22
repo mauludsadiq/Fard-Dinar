@@ -42,7 +42,7 @@ impl ObjectStore {
 
     pub fn load_bytes(&self, tagged_hash: &str) -> Result<Vec<u8>, FdError> {
         let (tag, hex_part) = tagged_hash.split_once(':').ok_or(FdError::InvalidHashTag)?;
-        if tag != "sha256" {
+        if tag != "ahd1024" {
             return Err(FdError::InvalidHashTag);
         }
         let path = self.root.join(hex_part);
