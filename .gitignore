@@ -2,3 +2,6 @@
 Cargo.lock
 *.zip
 .DS_Store
+
+receipt_*.json
+state_*.json
