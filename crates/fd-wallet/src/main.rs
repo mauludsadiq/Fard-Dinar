@@ -44,6 +44,18 @@ enum Command {
         #[arg(long, default_value_t = false)]
         auto_nonce: bool,
     },
+    PayRequest {
+        #[arg(long)]
+        wallet: PathBuf,
+        #[arg(long)]
+        base_url: String,
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        nonce: Option<u64>,
+        #[arg(long, default_value_t = false)]
+        auto_nonce: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -96,6 +108,40 @@ fn main() -> Result<()> {
             };
             let res = client.submit_signed_transfer(&wallet, &to, amount, resolved_nonce)?;
             println!("{}", serde_json::to_string_pretty(&res)?);
+        }
+        Command::PayRequest {
+            wallet,
+            base_url,
+            file,
+            nonce,
+            auto_nonce,
+        } => {
+            let wallet = load_wallet(&wallet)?;
+            let client = Client::new(&base_url);
+            let req: serde_json::Value = serde_json::from_slice(
+                &fs::read(&file).with_context(|| format!("failed to read {}", file.display()))?
+            ).with_context(|| format!("failed to parse {}", file.display()))?;
+            let to = req.get("to").and_then(|v| v.as_str()).context("missing to")?;
+            let amount = req.get("amount").and_then(|v| v.as_u64()).context("missing amount")?;
+            let memo = req.get("memo").and_then(|v| v.as_str()).unwrap_or("");
+            let resolved_nonce = if auto_nonce {
+                let state = client.get_state()?;
+                state.account_or_default(&wallet.public_key_hex()).next_nonce
+            } else {
+                nonce.context("missing --nonce (or pass --auto-nonce)")?
+            };
+            let res = client.submit_signed_transfer(&wallet, to, amount, resolved_nonce)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "amount": amount,
+                    "memo": memo,
+                    "ok": res.get("ok").and_then(|v| v.as_bool()).unwrap_or(false),
+                    "response": res,
+                    "to": to,
+                    "used_nonce": resolved_nonce
+                }))?
+            );
         }
     }
     Ok(())

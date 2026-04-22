@@ -21,6 +21,8 @@ enum Command {
         amount: u64,
         #[arg(long, default_value = "")]
         memo: String,
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
     VerifyReceipt {
         #[arg(long)]
@@ -37,15 +39,21 @@ enum Command {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::RequestPayment { vendor, amount, memo } => {
+        Command::RequestPayment { vendor, amount, memo, out } => {
             let vendor_pubkey = load_public_key(&vendor)?;
             let req = json!({
-                "kind": "fd_payment_request_v1",
-                "vendor_pubkey": vendor_pubkey,
                 "amount": amount,
+                "kind": "fd_payment_request_v1",
                 "memo": memo,
+                "nonce_mode": "auto",
+                "to": vendor_pubkey,
             });
-            println!("{}", serde_json::to_string_pretty(&req)?);
+            let text = serde_json::to_string_pretty(&req)?;
+            if let Some(path) = out {
+                fs::write(&path, &text)
+                    .with_context(|| format!("failed to write {}", path.display()))?;
+            }
+            println!("{}", text);
         }
         Command::VerifyReceipt {
             vendor,
