@@ -1,9 +1,87 @@
-use anyhow::{anyhow, Result};
-use fd_core::{Event, LedgerState, Receipt, RegistryState};
+use anyhow::{anyhow, Context, Result};
+use ed25519_dalek::{Signer, SigningKey};
+use fd_core::{
+    deposit_signing_payload, transfer_signing_payload, DepositAttestation, Event, LedgerState,
+    Receipt, RegistryState, TransferIntent,
+};
 use serde::de::DeserializeOwned;
 
 pub struct Client {
     base_url: String,
+}
+
+pub struct Wallet {
+    signing_key: SigningKey,
+}
+
+impl Wallet {
+    pub fn from_secret_hex(secret_hex: &str) -> Result<Self> {
+        let bytes = hex::decode(secret_hex).context("invalid secret key hex")?;
+        let arr: [u8; 32] = bytes
+            .try_into()
+            .map_err(|_| anyhow!("secret key must be 32 bytes"))?;
+        Ok(Self {
+            signing_key: SigningKey::from_bytes(&arr),
+        })
+    }
+
+    pub fn public_key_hex(&self) -> String {
+        hex::encode(self.signing_key.verifying_key().to_bytes())
+    }
+
+    pub fn build_signed_transfer(&self, to: &str, amount: u64, nonce: u64) -> TransferIntent {
+        let mut tx = TransferIntent {
+            kind: "transfer".to_string(),
+            from_key: self.public_key_hex(),
+            to_key: to.to_string(),
+            amount,
+            nonce,
+            signature: String::new(),
+        };
+        let sig = self.signing_key.sign(&transfer_signing_payload(&tx));
+        tx.signature = hex::encode(sig.to_bytes());
+        tx
+    }
+
+    pub fn build_signed_deposit(
+        &self,
+        beneficiary: &str,
+        usd_cents: u64,
+        external_ref: &str,
+        timestamp: u64,
+    ) -> DepositAttestation {
+        let mut dep = DepositAttestation {
+            kind: "deposit".to_string(),
+            oracle_id: self.public_key_hex(),
+            usd_cents,
+            beneficiary: beneficiary.to_string(),
+            external_ref: external_ref.to_string(),
+            timestamp,
+            signature: String::new(),
+        };
+        let sig = self.signing_key.sign(&deposit_signing_payload(&dep));
+        dep.signature = hex::encode(sig.to_bytes());
+        dep
+    }
+
+    pub fn build_signed_transfer_event(&self, to: &str, amount: u64, nonce: u64) -> Event {
+        Event::Transfer(self.build_signed_transfer(to, amount, nonce))
+    }
+
+    pub fn build_signed_deposit_event(
+        &self,
+        beneficiary: &str,
+        usd_cents: u64,
+        external_ref: &str,
+        timestamp: u64,
+    ) -> Event {
+        Event::Deposit(self.build_signed_deposit(
+            beneficiary,
+            usd_cents,
+            external_ref,
+            timestamp,
+        ))
+    }
 }
 
 impl Client {
