@@ -30,3 +30,5 @@ peer_registry_events_a/
 
 peer_registry_b_http.json
 peer_registry_b_http.processed.json
+
+http_events/

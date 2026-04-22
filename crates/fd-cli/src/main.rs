@@ -127,6 +127,10 @@ enum Command {
         state: Option<PathBuf>,
         #[arg(long)]
         ingest_dir: Option<PathBuf>,
+        #[arg(long)]
+        receipts_dir: Option<PathBuf>,
+        #[arg(long)]
+        objects_dir: Option<PathBuf>,
     },
 
     WalletSignDeposit {
@@ -465,7 +469,7 @@ fn main() -> Result<()> {
         }
 
 
-        Command::FdHttp { bind, registry, state, ingest_dir } => {
+        Command::FdHttp { bind, registry, state, ingest_dir, receipts_dir, objects_dir } => {
             let server = Server::http(&bind)
                 .map_err(|e| anyhow::anyhow!("failed to bind {}: {}", bind, e))?;
             println!("HTTP listening on {}", bind);
@@ -515,6 +519,41 @@ fn main() -> Result<()> {
                         }
                     } else {
                         Response::from_string("null")
+                    }
+                } else if url == "/info" {
+                    let body = serde_json::json!({
+                        "name": "fd-http",
+                        "version": env!("CARGO_PKG_VERSION"),
+                        "registry": registry.is_some(),
+                        "state": state.is_some(),
+                        "ingest_dir": ingest_dir.as_ref().map(|p| p.display().to_string()),
+                        "receipts_dir": receipts_dir.as_ref().map(|p| p.display().to_string()),
+                        "objects_dir": objects_dir.as_ref().map(|p| p.display().to_string()),
+                    });
+                    Response::from_string(serde_json::to_string_pretty(&body)?)
+                } else if let Some(hash) = url.strip_prefix("/objects/") {
+                    if let Some(dir) = &objects_dir {
+                        let file = dir.join(hash.replace("ahd1024:", ""));
+                        if file.exists() {
+                            let body = std::fs::read_to_string(file)?;
+                            Response::from_string(body)
+                        } else {
+                            Response::from_string("not found").with_status_code(404)
+                        }
+                    } else {
+                        Response::from_string("objects not configured").with_status_code(400)
+                    }
+                } else if let Some(hash) = url.strip_prefix("/receipts/") {
+                    if let Some(dir) = &receipts_dir {
+                        let file = dir.join(format!("{}.json", hash.replace("ahd1024:", "")));
+                        if file.exists() {
+                            let body = std::fs::read_to_string(file)?;
+                            Response::from_string(body)
+                        } else {
+                            Response::from_string("not found").with_status_code(404)
+                        }
+                    } else {
+                        Response::from_string("receipts not configured").with_status_code(400)
                     }
                 } else {
                     Response::from_string("not found").with_status_code(404)
