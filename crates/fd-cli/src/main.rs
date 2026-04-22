@@ -63,6 +63,10 @@ enum Command {
         #[arg(long)]
         state: PathBuf,
     },
+    FdDiff {
+        old_state: PathBuf,
+        new_state: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -114,6 +118,11 @@ fn main() -> Result<()> {
             let state: LedgerState = read_json(&state)?;
             print_supply_human(&state)?;
         }
+        Command::FdDiff { old_state, new_state } => {
+            let old_state: LedgerState = read_json(&old_state)?;
+            let new_state: LedgerState = read_json(&new_state)?;
+            print_diff_human(&old_state, &new_state)?;
+        }
     }
     Ok(())
 }
@@ -144,6 +153,32 @@ fn print_supply_human(state: &LedgerState) -> Result<()> {
     let supply: u64 = state.accounts.values().map(|a| a.balance).sum();
     println!("Total supply: {} FD", supply);
     println!("Accounts: {}", state.accounts.len());
+    Ok(())
+}
+
+fn print_diff_human(old_state: &LedgerState, new_state: &LedgerState) -> Result<()> {
+    let mut keys = std::collections::BTreeSet::new();
+    for k in old_state.accounts.keys() { keys.insert(k.clone()); }
+    for k in new_state.accounts.keys() { keys.insert(k.clone()); }
+
+    for key in keys {
+        let old_acc = old_state.account_or_default(&key);
+        let new_acc = new_state.account_or_default(&key);
+        let old_exists = old_state.accounts.contains_key(&key);
+        let new_exists = new_state.accounts.contains_key(&key);
+        if !old_exists && new_exists {
+            println!("+ accounts.{} : {{ balance: {}, next_nonce: {} }}", key, new_acc.balance, new_acc.next_nonce);
+        } else if old_exists && !new_exists {
+            println!("- accounts.{} : {{ balance: {}, next_nonce: {} }}", key, old_acc.balance, old_acc.next_nonce);
+        } else if old_acc != new_acc {
+            println!("~ accounts.{} : balance {} -> {}, next_nonce {} -> {}", key, old_acc.balance, new_acc.balance, old_acc.next_nonce, new_acc.next_nonce);
+        }
+    }
+
+    let old_supply: u64 = old_state.accounts.values().map(|a| a.balance).sum();
+    let new_supply: u64 = new_state.accounts.values().map(|a| a.balance).sum();
+    let delta: i128 = new_supply as i128 - old_supply as i128;
+    println!("Supply: {} -> {} ({:+})", old_supply, new_supply, delta);
     Ok(())
 }
 

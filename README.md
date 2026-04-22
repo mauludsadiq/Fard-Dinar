@@ -194,6 +194,15 @@ cargo run -p fd-cli -- \
 
 This prints the total FD supply in the state and the number of materialized accounts.
 
+### Diff two materialized states
+
+```bash
+cargo run -p fd-cli -- \
+  fd-diff state_1.json state_2.json
+```
+
+This prints account-level changes and total supply delta between two materialized states.
+
 ### Check canonical consistency only
 
 ```bash
