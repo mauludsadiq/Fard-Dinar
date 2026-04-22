@@ -869,3 +869,55 @@ These methods:
 
 This removes all boilerplate from wallet implementations.
 
+
+
+---
+
+## FD-WALLET v0.1 (Reference Wallet CLI)
+
+A minimal, deterministic reference wallet is provided.
+
+Location:
+
+    crates/fd-wallet
+
+### Commands
+
+Initialize wallet:
+
+    fd-wallet init --secret-hex <hex> --out wallet.json
+
+Get address:
+
+    fd-wallet address --wallet wallet.json
+
+Check balance:
+
+    fd-wallet balance --wallet wallet.json --base-url http://127.0.0.1:8085
+
+Send transfer:
+
+    fd-wallet send       --wallet wallet.json       --base-url http://127.0.0.1:8085       --to <recipient_pubkey>       --amount 100       --nonce 1
+
+### Properties
+
+- Uses fd-client for signing + submission
+- Fully deterministic (no randomness)
+- Compatible with FD-WIRE `/v1` API
+- Enforces nonce correctness via node validation
+- Works directly with reward-enabled state
+
+### Notes
+
+- Nonce must match `next_nonce` in state
+- Wallet file is a simple JSON:
+  
+      {
+        "secret_key_hex": "...",
+        "public_key_hex": "..."
+      }
+
+- Secret keys in fixtures are deterministic for testing only
+
+---
+
