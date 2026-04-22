@@ -381,3 +381,58 @@ Flow:
     registry_events/
     registry_state.json
     registry_state.processed.json
+
+
+---
+
+## Peer Sync (Distributed Mode)
+
+### Registry → Registry
+
+Run two registries and connect them:
+
+    cargo run -p fd-cli -- \
+      fd-registry \
+      --watch ./registry_events_b \
+      --registry-out registry_b.json \
+      --peer-registry registry_a.json
+
+Behavior:
+- pulls entries from peer registries
+- merges using min(event_hash)
+- converges deterministically
+
+---
+
+### Node → Peer Events + Registry
+
+    cargo run -p fd-cli -- \
+      fd-node \
+      --watch ./node_events \
+      --genesis examples/genesis.json \
+      --objects ./objects \
+      --state-out state.json \
+      --receipts ./receipts \
+      --peer-watch ./peer_events \
+      --peer-registry registry_a.json
+
+Behavior:
+- copies events from peer directories
+- gates execution using canonical registry winners
+- defers events with missing prerequisites (e.g. insufficient balance)
+- retries automatically when dependencies arrive
+
+---
+
+### Distributed Flow
+
+    Wallet → Registry A → Registry B → Node B → State + Receipts
+
+Properties:
+- deterministic convergence across nodes
+- no coordination required
+- eventual consistency via registry merge
+- execution strictly gated by canonical winners
+
+---
+
