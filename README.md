@@ -761,3 +761,79 @@ Two reference genesis configurations are provided:
 
 ---
 
+
+
+---
+
+## FD-CLIENT v0.1 (Rust SDK)
+
+A Rust client is provided for interacting with FD nodes over the canonical `/v1` API.
+
+Location:
+
+    crates/fd-client
+
+### Client
+
+Provides typed access to the wire protocol:
+
+- `get_info()`
+- `get_registry() -> RegistryState`
+- `get_state() -> LedgerState`
+- `get_receipt(run_id) -> Receipt`
+- `get_object(hash) -> JSON`
+- `submit_event(event)`
+
+Example:
+
+    let client = Client::new("http://127.0.0.1:8085");
+    let state = client.get_state()?;
+
+### Wallet (Signing Helpers)
+
+The client includes a deterministic wallet layer for constructing and signing events.
+
+Create wallet from secret:
+
+    let wallet = Wallet::from_secret_hex("<32-byte hex>")?;
+
+Get public key:
+
+    let pubkey = wallet.public_key_hex();
+
+Build signed transfer:
+
+    let tx = wallet.build_signed_transfer(
+        "<to_pubkey>",
+        2000,
+        0
+    );
+
+Build signed deposit:
+
+    let dep = wallet.build_signed_deposit(
+        "<beneficiary>",
+        10000,
+        "ref-1",
+        1
+    );
+
+Event wrappers:
+
+    let evt = wallet.build_signed_transfer_event(...);
+
+### Properties
+
+- Uses the same signing payloads as fd-core
+- Produces identical signatures to CLI wallet commands
+- Fully deterministic (no randomness in signing)
+- Canonical JSON compatible with FD-WIRE
+
+### Example
+
+Run the demo:
+
+    cargo run -p fd-client --example client_demo
+
+---
+
