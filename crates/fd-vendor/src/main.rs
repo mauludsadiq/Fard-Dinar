@@ -34,6 +34,14 @@ enum Command {
         #[arg(long)]
         amount: u64,
     },
+    Inbox {
+        #[arg(long)]
+        vendor: PathBuf,
+        #[arg(long)]
+        receipts_dir: PathBuf,
+        #[arg(long)]
+        events_dir: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -73,6 +81,63 @@ fn main() -> Result<()> {
                 "receipt": receipt,
             });
             println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+        Command::Inbox {
+            vendor,
+            receipts_dir,
+            events_dir,
+        } => {
+            let vendor_pubkey = load_public_key(&vendor)?;
+            let mut rows = Vec::new();
+
+            for entry in fs::read_dir(&receipts_dir)
+                .with_context(|| format!("failed to read {}", receipts_dir.display()))? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                    continue;
+                }
+
+                let receipt: fd_core::Receipt = serde_json::from_slice(
+                    &fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?
+                ).with_context(|| format!("failed to parse {}", path.display()))?;
+
+                let event_file = events_dir.join(format!("{}.json", receipt.input_hash.replace(":", "_")));
+                if !event_file.exists() {
+                    continue;
+                }
+
+                let event: serde_json::Value = serde_json::from_slice(
+                    &fs::read(&event_file).with_context(|| format!("failed to read {}", event_file.display()))?
+                ).with_context(|| format!("failed to parse {}", event_file.display()))?;
+
+                let to = event.get("to").and_then(|v| v.as_str());
+                if to != Some(vendor_pubkey.as_str()) {
+                    continue;
+                }
+
+                let from = event.get("from").and_then(|v| v.as_str()).unwrap_or("");
+                let amount = event.get("amount").and_then(|v| v.as_u64()).unwrap_or(0);
+                let (user_reward, vendor_reward, is_merchant) = receipt.transfer_effects
+                    .as_ref()
+                    .map(|fx| (fx.user_reward, fx.vendor_reward, fx.is_merchant))
+                    .unwrap_or((0, 0, false));
+
+                rows.push(json!({
+                    "run_id": receipt.run_id,
+                    "from": from,
+                    "to": to,
+                    "amount": amount,
+                    "user_reward": user_reward,
+                    "vendor_reward": vendor_reward,
+                    "is_merchant": is_merchant
+                }));
+            }
+
+            println!("{}", serde_json::to_string_pretty(&json!({
+                "vendor_pubkey": vendor_pubkey,
+                "payments": rows
+            }))?);
         }
     }
     Ok(())
