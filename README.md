@@ -837,3 +837,35 @@ Run the demo:
 
 ---
 
+
+
+### Convenience Submission
+
+The client provides one-call submission helpers that combine signing + submission:
+
+Submit transfer:
+
+    let res = client.submit_signed_transfer(
+        &wallet,
+        "<to_pubkey>",
+        2000,
+        0
+    )?;
+
+Submit deposit:
+
+    let res = client.submit_signed_deposit(
+        &wallet,
+        "<beneficiary>",
+        10000,
+        "ref-1",
+        1
+    )?;
+
+These methods:
+- build the canonical event
+- sign using the correct payload
+- submit to `/v1/events`
+
+This removes all boilerplate from wallet implementations.
+
