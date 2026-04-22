@@ -59,6 +59,10 @@ enum Command {
         #[arg(long)]
         receipt: PathBuf,
     },
+    FdSupply {
+        #[arg(long)]
+        state: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -106,6 +110,10 @@ fn main() -> Result<()> {
             let receipt: Receipt = read_json(&receipt)?;
             print_receipt_human(&receipt)?;
         }
+        Command::FdSupply { state } => {
+            let state: LedgerState = read_json(&state)?;
+            print_supply_human(&state)?;
+        }
     }
     Ok(())
 }
@@ -129,6 +137,13 @@ fn print_receipt_human(receipt: &Receipt) -> Result<()> {
     println!("Pre-state:   {}", receipt.pre_state_hash);
     println!("Post-state:  {}", receipt.post_state_hash);
     println!("Trace:       {}", receipt.trace_hash);
+    Ok(())
+}
+
+fn print_supply_human(state: &LedgerState) -> Result<()> {
+    let supply: u64 = state.accounts.values().map(|a| a.balance).sum();
+    println!("Total supply: {} FD", supply);
+    println!("Accounts: {}", state.accounts.len());
     Ok(())
 }
 

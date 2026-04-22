@@ -184,6 +184,16 @@ cargo run -p fd-cli -- \
 
 You can chain multiple events by feeding the emitted state file into the next `fd-apply` invocation.
 
+### Show total supply for a materialized state
+
+```bash
+cargo run -p fd-cli -- \
+  fd-supply \
+  --state state.json
+```
+
+This prints the total FD supply in the state and the number of materialized accounts.
+
 ### Check canonical consistency only
 
 ```bash
