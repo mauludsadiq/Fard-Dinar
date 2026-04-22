@@ -557,3 +557,52 @@ No intermediate staging directory required.
 
 ---
 
+
+
+---
+
+## HTTP API Surface
+
+Current HTTP endpoints:
+
+- GET /info
+- GET /registry
+- GET /state
+- GET /objects/<hash>
+- GET /receipts/<run_id>
+- POST /ingest
+
+Example:
+
+    cargo run -p fd-cli -- \
+      fd-http \
+      --bind 127.0.0.1:8084 \
+      --registry peer_registry_a.json \
+      --state peer_node_state_b.json \
+      --ingest-dir peer_registry_events_a \
+      --receipts-dir peer_node_receipts_b \
+      --objects-dir examples/objects
+
+Example queries:
+
+    curl http://127.0.0.1:8084/info
+    curl http://127.0.0.1:8084/registry
+    curl http://127.0.0.1:8084/state
+    curl http://127.0.0.1:8084/objects/ahd1024:72456d65ef7adfa93a7295d48532c8d4b1e604d29371cc4a82ad04e1816232d7
+    curl http://127.0.0.1:8084/receipts/ahd1024:60359a4106309b79c4f82ea5a6cda100665da0e9527aef793787f26992773abe
+    curl -X POST http://127.0.0.1:8084/ingest \
+      -H 'content-type: application/json' \
+      --data-binary @examples/transfer_alice_candidate_a.json
+
+Behavior:
+- ingest writes directly into the configured watch directory
+- objects and receipts are addressable over HTTP
+- state and registry are readable over HTTP
+- transport is now filesystem + HTTP hybrid
+
+Next moves:
+1. add versioned aliases under /v1/*
+2. keep current routes as compatibility aliases
+3. move node/registry peer sync to prefer /v1 endpoints
+4. then freeze the wire contract in code
+
