@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use fd_core::{verify_consistency, verify_replay, verify_transition, Event, GenesisConfiguration, LedgerState, ObjectStore, ProgramManifest};
+use fd_core::{verify_consistency, verify_replay, verify_transition, Event, GenesisConfiguration, LedgerState, ObjectStore, ProgramManifest, Receipt};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs;
@@ -50,8 +50,14 @@ enum Command {
         objects: PathBuf,
         #[arg(long)]
         out: PathBuf,
+        #[arg(long)]
+        receipt_out: Option<PathBuf>,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
+    },
+    FdReceipt {
+        #[arg(long)]
+        receipt: PathBuf,
     },
 }
 
@@ -80,7 +86,7 @@ fn main() -> Result<()> {
             let out = verify_consistency(&events)?;
             print_json(&out)?;
         }
-        Command::FdApply { event, pre_state, objects, out, repo } => {
+        Command::FdApply { event, pre_state, objects, out, receipt_out, repo } => {
             let event: Event = read_json(&event)?;
             let pre_state: LedgerState = read_json(&pre_state)?;
             let store = ObjectStore::new(objects);
@@ -89,7 +95,16 @@ fn main() -> Result<()> {
             let state_json = serde_json::to_string_pretty(&result.state)?;
             std::fs::write(&out, state_json)
                 .with_context(|| format!("failed to write {}", out.display()))?;
+            if let Some(receipt_path) = receipt_out {
+                let receipt_json = serde_json::to_string_pretty(&result.receipt)?;
+                std::fs::write(&receipt_path, receipt_json)
+                    .with_context(|| format!("failed to write {}", receipt_path.display()))?;
+            }
             print_json(&result.receipt)?;
+        }
+        Command::FdReceipt { receipt } => {
+            let receipt: Receipt = read_json(&receipt)?;
+            print_receipt_human(&receipt)?;
         }
     }
     Ok(())
@@ -104,6 +119,16 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
 fn print_json<T: Serialize>(value: &T) -> Result<()> {
     let text = serde_json::to_string_pretty(value)?;
     println!("{text}");
+    Ok(())
+}
+
+fn print_receipt_human(receipt: &Receipt) -> Result<()> {
+    println!("Run ID:      {}", receipt.run_id);
+    println!("Program:     {}", receipt.program_hash);
+    println!("Input:       {}", receipt.input_hash);
+    println!("Pre-state:   {}", receipt.pre_state_hash);
+    println!("Post-state:  {}", receipt.post_state_hash);
+    println!("Trace:       {}", receipt.trace_hash);
     Ok(())
 }
 

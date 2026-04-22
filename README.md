@@ -164,7 +164,25 @@ cargo run -p fd-cli -- \
   --repo .
 ```
 
-This command writes the full post-state to `--out` and prints the receipt JSON to stdout. You can chain multiple events by feeding the emitted state file into the next `fd-apply` invocation.
+This command writes the full post-state to `--out` and prints the receipt JSON to stdout.
+
+Optional:
+
+```bash
+--receipt-out receipt.json
+```
+
+will persist the receipt for later inspection.
+
+You can inspect a receipt with:
+
+```bash
+cargo run -p fd-cli -- \
+  fd-receipt \
+  --receipt receipt.json
+```
+
+You can chain multiple events by feeding the emitted state file into the next `fd-apply` invocation.
 
 ### Check canonical consistency only
 
