@@ -5,3 +5,6 @@ Cargo.lock
 
 receipt_*.json
 state_*.json
+
+wallet.json
+signed_*.json

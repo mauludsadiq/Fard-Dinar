@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use fd_core::{verify_consistency, verify_replay, verify_transition, Event, GenesisConfiguration, LedgerState, ObjectStore, ProgramManifest, Receipt};
+use ed25519_dalek::{Signer, SigningKey};
+use fd_core::{deposit_signing_payload, transfer_signing_payload, verify_consistency, verify_replay, verify_transition, DepositAttestation, Event, GenesisConfiguration, LedgerState, ObjectStore, ProgramManifest, Receipt, TransferIntent};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -67,6 +69,40 @@ enum Command {
         old_state: PathBuf,
         new_state: PathBuf,
     },
+    WalletGen {
+        #[arg(long)]
+        out: PathBuf,
+    },
+    WalletShow {
+        #[arg(long)]
+        secret: PathBuf,
+    },
+    WalletSignTransfer {
+        #[arg(long)]
+        secret: PathBuf,
+        #[arg(long)]
+        to: String,
+        #[arg(long)]
+        amount: u64,
+        #[arg(long)]
+        nonce: u64,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    WalletSignDeposit {
+        #[arg(long)]
+        secret: PathBuf,
+        #[arg(long)]
+        beneficiary: String,
+        #[arg(long)]
+        usd_cents: u64,
+        #[arg(long)]
+        external_ref: String,
+        #[arg(long)]
+        timestamp: u64,
+        #[arg(long)]
+        out: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -122,6 +158,79 @@ fn main() -> Result<()> {
             let old_state: LedgerState = read_json(&old_state)?;
             let new_state: LedgerState = read_json(&new_state)?;
             print_diff_human(&old_state, &new_state)?;
+        }
+        Command::WalletGen { out } => {
+            let mut secret = [0u8; 32];
+            let mut urandom = std::fs::File::open("/dev/urandom")
+                .context("failed to open /dev/urandom")?;
+            urandom
+                .read_exact(&mut secret)
+                .context("failed to read 32 random bytes from /dev/urandom")?;
+            let secret_hex = hex::encode(secret);
+            let signing_key = signing_key_from_secret_hex(&secret_hex)?;
+            let public_key = hex::encode(signing_key.verifying_key().to_bytes());
+            let wallet = serde_json::json!({
+                "secret_key_hex": secret_hex,
+                "public_key_hex": public_key,
+            });
+            std::fs::write(&out, serde_json::to_string_pretty(&wallet)?)
+                .with_context(|| format!("failed to write {}", out.display()))?;
+            print_json(&wallet)?;
+        }
+        Command::WalletShow { secret } => {
+            let wallet: serde_json::Value = read_json(&secret)?;
+            let secret_hex = wallet
+                .get("secret_key_hex")
+                .and_then(|v| v.as_str())
+                .context("missing secret_key_hex")?;
+            let signing_key = signing_key_from_secret_hex(secret_hex)?;
+            let public_key = hex::encode(signing_key.verifying_key().to_bytes());
+            println!("Public key: {}", public_key);
+        }
+        Command::WalletSignTransfer { secret, to, amount, nonce, out } => {
+            let wallet: serde_json::Value = read_json(&secret)?;
+            let secret_hex = wallet
+                .get("secret_key_hex")
+                .and_then(|v| v.as_str())
+                .context("missing secret_key_hex")?;
+            let signing_key = signing_key_from_secret_hex(secret_hex)?;
+            let from_key = hex::encode(signing_key.verifying_key().to_bytes());
+            let mut tx = TransferIntent {
+                kind: "transfer".to_string(),
+                from_key,
+                to_key: to,
+                amount,
+                nonce,
+                signature: String::new(),
+            };
+            let sig = signing_key.sign(&transfer_signing_payload(&tx));
+            tx.signature = hex::encode(sig.to_bytes());
+            std::fs::write(&out, serde_json::to_string_pretty(&tx)?)
+                .with_context(|| format!("failed to write {}", out.display()))?;
+            print_json(&tx)?;
+        }
+        Command::WalletSignDeposit { secret, beneficiary, usd_cents, external_ref, timestamp, out } => {
+            let wallet: serde_json::Value = read_json(&secret)?;
+            let secret_hex = wallet
+                .get("secret_key_hex")
+                .and_then(|v| v.as_str())
+                .context("missing secret_key_hex")?;
+            let signing_key = signing_key_from_secret_hex(secret_hex)?;
+            let oracle_id = hex::encode(signing_key.verifying_key().to_bytes());
+            let mut dep = DepositAttestation {
+                kind: "deposit".to_string(),
+                oracle_id,
+                usd_cents,
+                beneficiary,
+                external_ref,
+                timestamp,
+                signature: String::new(),
+            };
+            let sig = signing_key.sign(&deposit_signing_payload(&dep));
+            dep.signature = hex::encode(sig.to_bytes());
+            std::fs::write(&out, serde_json::to_string_pretty(&dep)?)
+                .with_context(|| format!("failed to write {}", out.display()))?;
+            print_json(&dep)?;
         }
     }
     Ok(())
@@ -180,6 +289,12 @@ fn print_diff_human(old_state: &LedgerState, new_state: &LedgerState) -> Result<
     let delta: i128 = new_supply as i128 - old_supply as i128;
     println!("Supply: {} -> {} ({:+})", old_supply, new_supply, delta);
     Ok(())
+}
+
+fn signing_key_from_secret_hex(secret_hex: &str) -> Result<SigningKey> {
+    let bytes = hex::decode(secret_hex).context("invalid secret key hex")?;
+    let arr: [u8; 32] = bytes.try_into().map_err(|_| anyhow::anyhow!("secret key must be 32 bytes"))?;
+    Ok(SigningKey::from_bytes(&arr))
 }
 
 fn build_program_manifest(repo_root: &Path) -> Result<ProgramManifest> {
