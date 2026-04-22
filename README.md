@@ -723,3 +723,41 @@ For a transfer `amount = A`:
 
 ---
 
+
+
+---
+
+## Genesis Configurations
+
+Two reference genesis configurations are provided:
+
+### 1. Zero-Reward (Backward Compatible)
+
+    examples/genesis.json
+
+- All reward rates set to 0
+- No treasury required
+- Behavior identical to pre-v1.1.0
+
+### 2. Treasury-Backed Rewards
+
+    examples/genesis_rewards.json
+
+- Reward rates set to 200 bps (2%)
+- Includes a funded treasury account:
+
+    "accounts": {
+      "TREASURY": { "balance": 100000000, "next_nonce": 0 }
+    }
+
+- Transfers debit rewards from treasury
+- Enables full incentive model
+
+### Notes
+
+- `treasury_account` must exist in `accounts`
+- Rewards fail deterministically if treasury is missing or underfunded
+- Both configurations are replay-compatible and deterministic
+
+---
+
