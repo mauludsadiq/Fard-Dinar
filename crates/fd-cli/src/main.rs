@@ -104,12 +104,18 @@ enum Command {
         receipts: PathBuf,
         #[arg(long)]
         registry: Option<PathBuf>,
+        #[arg(long)]
+        peer_watch: Vec<PathBuf>,
+        #[arg(long)]
+        peer_registry: Vec<PathBuf>,
     },
     FdRegistry {
         #[arg(long)]
         watch: PathBuf,
         #[arg(long)]
         registry_out: PathBuf,
+        #[arg(long)]
+        peer_registry: Vec<PathBuf>,
     },
 
     WalletSignDeposit {
@@ -182,7 +188,7 @@ fn main() -> Result<()> {
             let new_state: LedgerState = read_json(&new_state)?;
             print_diff_human(&old_state, &new_state)?;
         }
-        Command::FdNode { watch, genesis, objects, state_out, receipts, registry } => {
+        Command::FdNode { watch, genesis, objects, state_out, receipts, registry, peer_watch, peer_registry } => {
             let mut state: LedgerState = if state_out.exists() {
                 read_json(&state_out)?
             } else {
@@ -206,11 +212,56 @@ fn main() -> Result<()> {
             };
 
             loop {
-                let registry_state: Option<RegistryState> = match &registry {
-                    Some(registry_path) if registry_path.exists() => Some(read_json(registry_path)?),
-                    Some(_) => None,
-                    None => None,
+                for peer_dir in &peer_watch {
+                    if peer_dir.exists() {
+                        for entry in std::fs::read_dir(peer_dir)? {
+                            let entry = entry?;
+                            let src = entry.path();
+                            if src.extension().and_then(|s| s.to_str()) != Some("json") {
+                                continue;
+                            }
+                            let Some(name) = src.file_name() else {
+                                continue;
+                            };
+                            let dst = watch.join(name);
+                            if !dst.exists() {
+                                std::fs::copy(&src, &dst)
+                                    .with_context(|| format!("failed to copy {} -> {}", src.display(), dst.display()))?;
+                            }
+                        }
+                    }
+                }
+
+                let registry_state: Option<RegistryState> = if let Some(registry_path) = &registry {
+                    if registry_path.exists() {
+                        Some(read_json(registry_path)?)
+                    } else {
+                        None
+                    }
+                } else {
+                    let mut merged: Option<RegistryState> = None;
+                    for peer_path in &peer_registry {
+                        if !peer_path.exists() {
+                            continue;
+                        }
+                        let peer: RegistryState = read_json(peer_path)?;
+                        match &mut merged {
+                            None => merged = Some(peer),
+                            Some(acc) => {
+                                for (k, v) in peer.entries {
+                                    match acc.entries.get(&k) {
+                                        Some(existing) if existing.event_hash <= v.event_hash => {}
+                                        _ => {
+                                            acc.entries.insert(k, v);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    merged
                 };
+
                 for entry in std::fs::read_dir(&watch)? {
                     let entry = entry?;
                     let path = entry.path();
@@ -237,16 +288,12 @@ fn main() -> Result<()> {
                             Some(entry) if entry.event_hash == eh => {}
                             Some(_) => {
                                 println!("Skipped (non-canonical): {}", path.display());
-                                processed.insert(key);
-                                std::fs::write(&processed_path, serde_json::to_string_pretty(&processed)?)
-                                    .with_context(|| format!("failed to write {}", processed_path.display()))?;
+                                // moved into success/rejection branches
                                 continue;
                             }
                             None => {
                                 println!("Skipped (not registered): {}", path.display());
-                                processed.insert(key);
-                                std::fs::write(&processed_path, serde_json::to_string_pretty(&processed)?)
-                                    .with_context(|| format!("failed to write {}", processed_path.display()))?;
+                                // moved into success/rejection branches
                                 continue;
                             }
                         }
@@ -266,8 +313,18 @@ fn main() -> Result<()> {
 
                             println!("Applied: {}", path.display());
                             println!("Run ID: {}", result.receipt.run_id);
+
+                            processed.insert(key);
+                            std::fs::write(&processed_path, serde_json::to_string_pretty(&processed)?)
+                                .with_context(|| format!("failed to write {}", processed_path.display()))?;
                         }
                         Err(err) => {
+                            if err.to_string().contains("insufficient balance") {
+                                println!("Deferred: {}", path.display());
+                                println!("Error: {}", err);
+                                continue;
+                            }
+
                             let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("event");
                             let error_path = errors_dir.join(format!("{}.error.json", stem));
                             let error_doc = serde_json::json!({
@@ -278,18 +335,18 @@ fn main() -> Result<()> {
                                 .with_context(|| format!("failed to write {}", error_path.display()))?;
                             println!("Rejected: {}", path.display());
                             println!("Error: {}", err);
+
+                            processed.insert(key);
+                            std::fs::write(&processed_path, serde_json::to_string_pretty(&processed)?)
+                                .with_context(|| format!("failed to write {}", processed_path.display()))?;
                         }
                     }
-
-                    processed.insert(key);
-                    std::fs::write(&processed_path, serde_json::to_string_pretty(&processed)?)
-                        .with_context(|| format!("failed to write {}", processed_path.display()))?;
                 }
 
                 thread::sleep(Duration::from_millis(500));
             }
         }
-        Command::FdRegistry { watch, registry_out } => {
+        Command::FdRegistry { watch, registry_out, peer_registry } => {
             let processed_path = registry_out.with_extension("processed.json");
             let mut processed: std::collections::BTreeSet<String> = if processed_path.exists() {
                 read_json(&processed_path)?
@@ -305,6 +362,22 @@ fn main() -> Result<()> {
             loop {
                 let mut changed = false;
                 let mut events = Vec::new();
+
+                for peer_path in &peer_registry {
+                    if !peer_path.exists() {
+                        continue;
+                    }
+                    let peer: RegistryState = read_json(peer_path)?;
+                    for (k, v) in peer.entries {
+                        match registry.entries.get(&k) {
+                            Some(existing) if existing.event_hash <= v.event_hash => {}
+                            _ => {
+                                registry.entries.insert(k, v);
+                                changed = true;
+                            }
+                        }
+                    }
+                }
 
                 for entry in std::fs::read_dir(&watch)? {
                     let entry = entry?;

@@ -17,3 +17,13 @@ node_state.processed.json
 registry_events/
 registry_state.json
 registry_state.processed.json
+
+peer_node_events_b/
+peer_node_receipts_b/
+peer_node_state_b.json
+peer_node_state_b.processed.json
+peer_registry_a.json
+peer_registry_a.processed.json
+peer_registry_b.json
+peer_registry_b.processed.json
+peer_registry_events_a/
