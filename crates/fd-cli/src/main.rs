@@ -8,8 +8,9 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
-use std::time::Duration;
+use tiny_http::{Server, Response};
 use std::thread;
+use std::time::Duration;
 
 #[derive(Debug, Parser)]
 #[command(name = "fardverify")]
@@ -116,6 +117,14 @@ enum Command {
         registry_out: PathBuf,
         #[arg(long)]
         peer_registry: Vec<PathBuf>,
+    },
+    FdHttp {
+        #[arg(long, default_value = "127.0.0.1:8080")]
+        bind: String,
+        #[arg(long)]
+        registry: Option<PathBuf>,
+        #[arg(long)]
+        state: Option<PathBuf>,
     },
 
     WalletSignDeposit {
@@ -241,10 +250,19 @@ fn main() -> Result<()> {
                 } else {
                     let mut merged: Option<RegistryState> = None;
                     for peer_path in &peer_registry {
-                        if !peer_path.exists() {
-                            continue;
-                        }
-                        let peer: RegistryState = read_json(peer_path)?;
+                        let peer: RegistryState = if peer_path.to_string_lossy().starts_with("http://") || peer_path.to_string_lossy().starts_with("https://") {
+                            let body = ureq::get(&peer_path.to_string_lossy()).call()
+                                .map_err(|e| anyhow::anyhow!("failed to GET {}: {}", peer_path.display(), e))?
+                                .into_string()
+                                .map_err(|e| anyhow::anyhow!("failed to read HTTP body {}: {}", peer_path.display(), e))?;
+                            serde_json::from_str(&body)
+                                .map_err(|e| anyhow::anyhow!("failed to parse HTTP registry {}: {}", peer_path.display(), e))?
+                        } else {
+                            if !peer_path.exists() {
+                                continue;
+                            }
+                            read_json(peer_path)?
+                        };
                         match &mut merged {
                             None => merged = Some(peer),
                             Some(acc) => {
@@ -364,10 +382,19 @@ fn main() -> Result<()> {
                 let mut events = Vec::new();
 
                 for peer_path in &peer_registry {
-                    if !peer_path.exists() {
-                        continue;
-                    }
-                    let peer: RegistryState = read_json(peer_path)?;
+                    let peer: RegistryState = if peer_path.to_string_lossy().starts_with("http://") || peer_path.to_string_lossy().starts_with("https://") {
+                        let body = ureq::get(&peer_path.to_string_lossy()).call()
+                            .map_err(|e| anyhow::anyhow!("failed to GET {}: {}", peer_path.display(), e))?
+                            .into_string()
+                            .map_err(|e| anyhow::anyhow!("failed to read HTTP body {}: {}", peer_path.display(), e))?;
+                        serde_json::from_str(&body)
+                            .map_err(|e| anyhow::anyhow!("failed to parse HTTP registry {}: {}", peer_path.display(), e))?
+                    } else {
+                        if !peer_path.exists() {
+                            continue;
+                        }
+                        read_json(peer_path)?
+                    };
                     for (k, v) in peer.entries {
                         match registry.entries.get(&k) {
                             Some(existing) if existing.event_hash <= v.event_hash => {}
@@ -432,6 +459,44 @@ fn main() -> Result<()> {
                     .with_context(|| format!("failed to write {}", processed_path.display()))?;
 
                 thread::sleep(Duration::from_millis(500));
+            }
+        }
+
+
+        Command::FdHttp { bind, registry, state } => {
+            let server = Server::http(&bind)
+                .map_err(|e| anyhow::anyhow!("failed to bind {}: {}", bind, e))?;
+            println!("HTTP listening on {}", bind);
+
+            for request in server.incoming_requests() {
+                let url = request.url().to_string();
+                let response = if url == "/registry" {
+                    if let Some(path) = &registry {
+                        if path.exists() {
+                            let body = std::fs::read_to_string(path)?;
+                            Response::from_string(body)
+                        } else {
+                            Response::from_string("null")
+                        }
+                    } else {
+                        Response::from_string("null")
+                    }
+                } else if url == "/state" {
+                    if let Some(path) = &state {
+                        if path.exists() {
+                            let body = std::fs::read_to_string(path)?;
+                            Response::from_string(body)
+                        } else {
+                            Response::from_string("null")
+                        }
+                    } else {
+                        Response::from_string("null")
+                    }
+                } else {
+                    Response::from_string("not found").with_status_code(404)
+                };
+
+                let _ = request.respond(response);
             }
         }
 

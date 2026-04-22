@@ -27,3 +27,6 @@ peer_registry_a.processed.json
 peer_registry_b.json
 peer_registry_b.processed.json
 peer_registry_events_a/
+
+peer_registry_b_http.json
+peer_registry_b_http.processed.json
