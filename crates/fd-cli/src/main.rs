@@ -125,6 +125,8 @@ enum Command {
         registry: Option<PathBuf>,
         #[arg(long)]
         state: Option<PathBuf>,
+        #[arg(long)]
+        ingest_dir: Option<PathBuf>,
     },
 
     WalletSignDeposit {
@@ -463,14 +465,36 @@ fn main() -> Result<()> {
         }
 
 
-        Command::FdHttp { bind, registry, state } => {
+        Command::FdHttp { bind, registry, state, ingest_dir } => {
             let server = Server::http(&bind)
                 .map_err(|e| anyhow::anyhow!("failed to bind {}: {}", bind, e))?;
             println!("HTTP listening on {}", bind);
 
-            for request in server.incoming_requests() {
+            for mut request in server.incoming_requests() {
                 let url = request.url().to_string();
-                let response = if url == "/registry" {
+                let response = if url == "/ingest" && request.method() == &tiny_http::Method::Post {
+                    let mut content = String::new();
+                    request.as_reader().read_to_string(&mut content)
+                        .map_err(|e| anyhow::anyhow!("failed to read body: {}", e))?;
+
+                    let event: Event = serde_json::from_str(&content)
+                        .map_err(|e| anyhow::anyhow!("invalid event JSON: {}", e))?;
+
+                    if let Some(dir) = &ingest_dir {
+                        std::fs::create_dir_all(dir)
+                            .map_err(|e| anyhow::anyhow!("failed to create {}: {}", dir.display(), e))?;
+
+                        let fname = format!("{}.json", event_hash(&event).0.replace(":", "_"));
+                        let out = dir.join(fname);
+
+                        std::fs::write(&out, content)
+                            .map_err(|e| anyhow::anyhow!("failed to write {}: {}", out.display(), e))?;
+
+                        Response::from_string("ok")
+                    } else {
+                        Response::from_string("no ingest dir configured").with_status_code(400)
+                    }
+                } else if url == "/registry" {
                     if let Some(path) = &registry {
                         if path.exists() {
                             let body = std::fs::read_to_string(path)?;
