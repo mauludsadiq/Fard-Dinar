@@ -476,7 +476,7 @@ fn main() -> Result<()> {
 
             for mut request in server.incoming_requests() {
                 let url = request.url().to_string();
-                let response = if url == "/ingest" && request.method() == &tiny_http::Method::Post {
+                let response = if (url == "/ingest" || url == "/v1/events") && request.method() == &tiny_http::Method::Post {
                     let mut content = String::new();
                     request.as_reader().read_to_string(&mut content)
                         .map_err(|e| anyhow::anyhow!("failed to read body: {}", e))?;
@@ -498,7 +498,7 @@ fn main() -> Result<()> {
                     } else {
                         Response::from_string("no ingest dir configured").with_status_code(400)
                     }
-                } else if url == "/registry" {
+                } else if url == "/registry" || url == "/v1/registry" {
                     if let Some(path) = &registry {
                         if path.exists() {
                             let body = std::fs::read_to_string(path)?;
@@ -509,7 +509,7 @@ fn main() -> Result<()> {
                     } else {
                         Response::from_string("null")
                     }
-                } else if url == "/state" {
+                } else if url == "/state" || url == "/v1/state" {
                     if let Some(path) = &state {
                         if path.exists() {
                             let body = std::fs::read_to_string(path)?;
@@ -520,7 +520,7 @@ fn main() -> Result<()> {
                     } else {
                         Response::from_string("null")
                     }
-                } else if url == "/info" {
+                } else if url == "/info" || url == "/v1/info" {
                     let body = serde_json::json!({
                         "name": "fd-http",
                         "version": env!("CARGO_PKG_VERSION"),
@@ -531,7 +531,7 @@ fn main() -> Result<()> {
                         "objects_dir": objects_dir.as_ref().map(|p| p.display().to_string()),
                     });
                     Response::from_string(serde_json::to_string_pretty(&body)?)
-                } else if let Some(hash) = url.strip_prefix("/objects/") {
+                } else if let Some(hash) = url.strip_prefix("/objects/").or_else(|| url.strip_prefix("/v1/objects/")) {
                     if let Some(dir) = &objects_dir {
                         let file = dir.join(hash.replace("ahd1024:", ""));
                         if file.exists() {
@@ -543,7 +543,7 @@ fn main() -> Result<()> {
                     } else {
                         Response::from_string("objects not configured").with_status_code(400)
                     }
-                } else if let Some(hash) = url.strip_prefix("/receipts/") {
+                } else if let Some(hash) = url.strip_prefix("/receipts/").or_else(|| url.strip_prefix("/v1/receipts/")) {
                     if let Some(dir) = &receipts_dir {
                         let file = dir.join(format!("{}.json", hash.replace("ahd1024:", "")));
                         if file.exists() {
