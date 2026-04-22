@@ -948,3 +948,73 @@ Manual override remains available:
 Use `--auto-nonce` for normal operation.
 Use explicit `--nonce` only for debugging or replay scenarios.
 
+
+
+---
+
+## FD-VENDOR v0.2 (Payment Request + POS Flow)
+
+The vendor CLI now supports canonical payment requests and end-to-end POS flows.
+
+### Payment Request (Canonical JSON)
+
+Generate a payment request:
+
+    fd-vendor request-payment \
+      --vendor vendor.json \
+      --amount 100 \
+      --memo "coffee" \
+      --out request.json
+
+Output (canonical):
+
+    {
+      "amount": 100,
+      "kind": "fd_payment_request_v1",
+      "memo": "coffee",
+      "nonce_mode": "auto",
+      "to": "<vendor_pubkey>"
+    }
+
+This format is stable and can be encoded as:
+- QR code
+- deep link
+- file transfer
+
+### Wallet Payment (Pay Request)
+
+Wallet can consume the request directly:
+
+    fd-wallet pay-request \
+      --wallet wallet.json \
+      --base-url http://127.0.0.1:8085 \
+      --file request.json \
+      --auto-nonce
+
+Behavior:
+- Parses canonical request JSON
+- Resolves nonce automatically
+- Signs and submits transfer
+- Returns structured result
+
+Example output:
+
+    {
+      "amount": 100,
+      "memo": "coffee",
+      "ok": true,
+      "response": { "ok": true },
+      "to": "<vendor_pubkey>",
+      "used_nonce": 1
+    }
+
+### End-to-End Flow
+
+    fd-vendor request-payment --out request.json
+    fd-wallet pay-request --file request.json --auto-nonce
+    fd-vendor verify-receipt --run-id <id> ...
+
+This is the first complete POS loop.
+
+---
+
