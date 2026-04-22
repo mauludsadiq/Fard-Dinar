@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/fd-core", "crates/fd-cli", "crates/fd-client"]
+members = ["crates/fd-core", "crates/fd-cli", "crates/fd-client", "crates/fd-wallet"]
 resolver = "2"
 
 [workspace.package]
