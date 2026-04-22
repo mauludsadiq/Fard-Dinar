@@ -169,8 +169,8 @@ fn apply_transfer(store: &ObjectStore, state: &mut LedgerState, tx: &TransferInt
         return Err(FdError::InsufficientBalance);
     }
 
-    let sender_rebate = tx.amount / 100;
-    let merchant_rebate = if is_merchant(store, state, &tx.to_key)? { tx.amount / 100 } else { 0 };
+    let sender_rebate = tx.amount / 50;
+    let merchant_rebate = if is_merchant(store, state, &tx.to_key)? { tx.amount / 50 } else { 0 };
 
     {
         let from_mut = state.materialize_account_mut(&tx.from_key);

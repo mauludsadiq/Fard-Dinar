@@ -81,9 +81,9 @@ fn deposit_then_transfer_updates_balances_and_nonces() {
     let result = apply_event(&store, &manifest, &state, &Event::Transfer(tx)).unwrap();
     let state = result.state;
 
-    assert_eq!(state.account_or_default(&public_hex(&alice)).balance, 8_020);
+    assert_eq!(state.account_or_default(&public_hex(&alice)).balance, 8_040);
     assert_eq!(state.account_or_default(&public_hex(&alice)).next_nonce, 1);
-    assert_eq!(state.account_or_default(&public_hex(&merchant)).balance, 2_020);
+    assert_eq!(state.account_or_default(&public_hex(&merchant)).balance, 2_040);
 }
 
 #[test]
