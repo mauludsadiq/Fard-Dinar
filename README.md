@@ -322,3 +322,63 @@ zip -r "Fard Dinar.zip" "Fard Dinar"
 ```
 
 A packaged zip is included with this deliverable.
+
+
+## Live Node (execution)
+
+    cargo run -p fd-cli -- \
+      fd-node \
+      --watch ./events \
+      --genesis examples/genesis.json \
+      --objects ./objects \
+      --state-out state.json \
+      --receipts ./receipts
+
+Watches a directory, applies valid events, persists:
+- state
+- receipts
+- processed index
+- rejection logs (_errors/)
+
+---
+
+## Registry Node (canonicalization)
+
+    cargo run -p fd-cli -- \
+      fd-registry \
+      --watch ./registry_events \
+      --registry-out registry_state.json
+
+Maintains canonical event selection using:
+- conflict key: (effect_kind, conflict_key)
+- resolution rule: min(event_hash)
+
+Logs:
+- accepted = first insert
+- replaced = better candidate
+- ignored = worse candidate
+
+---
+
+## System Model
+
+    Signed Intent -> Registry -> Node -> Receipts
+
+Flow:
+1. Wallet signs intent
+2. Registry selects canonical winner
+3. Node executes deterministically
+4. Receipt commits the transition
+
+---
+
+## Runtime Artifacts (ignored)
+
+    node_events/
+    node_receipts/
+    node_state.json
+    node_state.processed.json
+
+    registry_events/
+    registry_state.json
+    registry_state.processed.json
