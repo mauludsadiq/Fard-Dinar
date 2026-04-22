@@ -494,9 +494,9 @@ fn main() -> Result<()> {
                         std::fs::write(&out, content)
                             .map_err(|e| anyhow::anyhow!("failed to write {}: {}", out.display(), e))?;
 
-                        Response::from_string("ok")
+                        http_json_response(&serde_json::json!({"ok":true}), 200)?
                     } else {
-                        Response::from_string("no ingest dir configured").with_status_code(400)
+                        http_json_response(&serde_json::json!({"ok":false,"code":"no_ingest_dir","error":"no ingest dir configured"}), 400)?
                     }
                 } else if url == "/registry" || url == "/v1/registry" {
                     if let Some(path) = &registry {
@@ -538,10 +538,10 @@ fn main() -> Result<()> {
                             let body = std::fs::read_to_string(file)?;
                             Response::from_string(body)
                         } else {
-                            Response::from_string("not found").with_status_code(404)
+                            http_json_response(&serde_json::json!({"ok":false,"code":"not_found","error":"not found"}), 404)?
                         }
                     } else {
-                        Response::from_string("objects not configured").with_status_code(400)
+                        http_json_response(&serde_json::json!({"ok":false,"code":"objects_not_configured","error":"objects not configured"}), 400)?
                     }
                 } else if let Some(hash) = url.strip_prefix("/receipts/").or_else(|| url.strip_prefix("/v1/receipts/")) {
                     if let Some(dir) = &receipts_dir {
@@ -550,13 +550,13 @@ fn main() -> Result<()> {
                             let body = std::fs::read_to_string(file)?;
                             Response::from_string(body)
                         } else {
-                            Response::from_string("not found").with_status_code(404)
+                            http_json_response(&serde_json::json!({"ok":false,"code":"not_found","error":"not found"}), 404)?
                         }
                     } else {
-                        Response::from_string("receipts not configured").with_status_code(400)
+                        http_json_response(&serde_json::json!({"ok":false,"code":"receipts_not_configured","error":"receipts not configured"}), 400)?
                     }
                 } else {
-                    Response::from_string("not found").with_status_code(404)
+                    http_json_response(&serde_json::json!({"ok":false,"code":"not_found","error":"not found"}), 404)?
                 };
 
                 let _ = request.respond(response);
@@ -650,6 +650,11 @@ fn print_json<T: Serialize>(value: &T) -> Result<()> {
     let text = serde_json::to_string_pretty(value)?;
     println!("{text}");
     Ok(())
+}
+
+fn http_json_response<T: Serialize>(value: &T, status: u16) -> Result<Response<std::io::Cursor<Vec<u8>>>> {
+    let body = serde_json::to_string_pretty(value)?;
+    Ok(Response::from_string(body).with_status_code(status))
 }
 
 fn print_receipt_human(receipt: &Receipt) -> Result<()> {
