@@ -8,6 +8,8 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
+use std::time::Duration;
+use std::thread;
 
 #[derive(Debug, Parser)]
 #[command(name = "fardverify")]
@@ -89,6 +91,19 @@ enum Command {
         #[arg(long)]
         out: PathBuf,
     },
+    FdNode {
+        #[arg(long)]
+        watch: PathBuf,
+        #[arg(long)]
+        genesis: PathBuf,
+        #[arg(long)]
+        objects: PathBuf,
+        #[arg(long)]
+        state_out: PathBuf,
+        #[arg(long)]
+        receipts: PathBuf,
+    },
+
     WalletSignDeposit {
         #[arg(long)]
         secret: PathBuf,
@@ -159,6 +174,79 @@ fn main() -> Result<()> {
             let new_state: LedgerState = read_json(&new_state)?;
             print_diff_human(&old_state, &new_state)?;
         }
+        Command::FdNode { watch, genesis, objects, state_out, receipts } => {
+            let mut state: LedgerState = if state_out.exists() {
+                read_json(&state_out)?
+            } else {
+                let genesis_cfg: GenesisConfiguration = read_json(&genesis)?;
+                genesis_cfg.into()
+            };
+            let store = ObjectStore::new(objects);
+            let manifest = build_program_manifest(Path::new("."))?;
+
+            std::fs::create_dir_all(&receipts)
+                .with_context(|| format!("failed to create {}", receipts.display()))?;
+            let errors_dir = watch.join("_errors");
+            std::fs::create_dir_all(&errors_dir)
+                .with_context(|| format!("failed to create {}", errors_dir.display()))?;
+
+            let processed_path = state_out.with_extension("processed.json");
+            let mut processed: std::collections::BTreeSet<String> = if processed_path.exists() {
+                read_json(&processed_path)?
+            } else {
+                std::collections::BTreeSet::new()
+            };
+
+            loop {
+                for entry in std::fs::read_dir(&watch)? {
+                    let entry = entry?;
+                    let path = entry.path();
+                    if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                        continue;
+                    }
+                    let key = path.to_string_lossy().to_string();
+                    if processed.contains(&key) {
+                        continue;
+                    }
+
+                    let event: Event = read_json(&path)?;
+                    match fd_core::apply_event(&store, &manifest, &state, &event) {
+                        Ok(result) => {
+                            state = result.state;
+
+                            let receipt_path = receipts.join(format!("{}.json", result.receipt.run_id.replace("sha256:", "")));
+                            std::fs::write(&receipt_path, serde_json::to_string_pretty(&result.receipt)?)
+                                .with_context(|| format!("failed to write {}", receipt_path.display()))?;
+
+                            std::fs::write(&state_out, serde_json::to_string_pretty(&state)?)
+                                .with_context(|| format!("failed to write {}", state_out.display()))?;
+
+                            println!("Applied: {}", path.display());
+                            println!("Run ID: {}", result.receipt.run_id);
+                        }
+                        Err(err) => {
+                            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("event");
+                            let error_path = errors_dir.join(format!("{}.error.json", stem));
+                            let error_doc = serde_json::json!({
+                                "event_path": path,
+                                "error": err.to_string(),
+                            });
+                            std::fs::write(&error_path, serde_json::to_string_pretty(&error_doc)?)
+                                .with_context(|| format!("failed to write {}", error_path.display()))?;
+                            println!("Rejected: {}", path.display());
+                            println!("Error: {}", err);
+                        }
+                    }
+
+                    processed.insert(key);
+                    std::fs::write(&processed_path, serde_json::to_string_pretty(&processed)?)
+                        .with_context(|| format!("failed to write {}", processed_path.display()))?;
+                }
+
+                thread::sleep(Duration::from_millis(500));
+            }
+        }
+
         Command::WalletGen { out } => {
             let mut secret = [0u8; 32];
             let mut urandom = std::fs::File::open("/dev/urandom")

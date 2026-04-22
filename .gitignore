@@ -8,3 +8,8 @@ state_*.json
 
 wallet.json
 signed_*.json
+
+node_events/
+node_receipts/
+node_state.json
+node_state.processed.json
