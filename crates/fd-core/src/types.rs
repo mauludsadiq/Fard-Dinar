@@ -19,11 +19,20 @@ impl Default for Account {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RewardConfig {
+    pub user_p2p_bps: u32,
+    pub user_spend_bps: u32,
+    pub vendor_spend_bps: u32,
+    pub treasury_account: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LedgerState {
     pub accounts: BTreeMap<PublicKeyHex, Account>,
     pub consumed_deposits: BTreeSet<String>,
     pub merchant_registry_hash: String,
     pub oracle_set_hash: String,
+    pub reward_config: RewardConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -68,6 +77,7 @@ pub struct GenesisConfiguration {
     pub consumed_deposits: Vec<String>,
     pub merchant_registry_hash: String,
     pub oracle_set_hash: String,
+    pub reward_config: RewardConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -124,6 +134,7 @@ impl From<GenesisConfiguration> for LedgerState {
             consumed_deposits: value.consumed_deposits.into_iter().collect(),
             merchant_registry_hash: value.merchant_registry_hash,
             oracle_set_hash: value.oracle_set_hash,
+            reward_config: value.reward_config,
         }
     }
 }

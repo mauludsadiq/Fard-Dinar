@@ -1,5 +1,5 @@
 use ed25519_dalek::{Signer, SigningKey};
-use fd_core::{apply_event, canonical_event_set, deposit_signing_payload, event_hash, replay_events, transfer_signing_payload, DepositAttestation, Event, LedgerState, MerchantRegistrySnapshot, ObjectStore, OracleSetSnapshot, ProgramManifest, TransferIntent};
+use fd_core::{Account, apply_event, canonical_event_set, deposit_signing_payload, event_hash, replay_events, transfer_signing_payload, DepositAttestation, Event, LedgerState, MerchantRegistrySnapshot, ObjectStore, OracleSetSnapshot, ProgramManifest, TransferIntent};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
@@ -40,11 +40,19 @@ fn fixture() -> (ObjectStore, LedgerState, SigningKey, SigningKey, SigningKey, S
         version: "1.0.0".into(),
         oracles: vec![public_hex(&oracle)],
     };
+    let mut accounts = BTreeMap::new();
+    accounts.insert(public_hex(&oracle), Account { balance: 1_000_000, next_nonce: 0 });
     let state = LedgerState {
-        accounts: BTreeMap::new(),
+        accounts,
         consumed_deposits: BTreeSet::new(),
         merchant_registry_hash: write_snapshot(&store, &merchant_snapshot),
         oracle_set_hash: write_snapshot(&store, &oracle_snapshot),
+        reward_config: fd_core::RewardConfig {
+            user_p2p_bps: 200,
+            user_spend_bps: 200,
+            vendor_spend_bps: 200,
+            treasury_account: public_hex(&oracle),
+        },
     };
     (store, state, alice, bob, merchant, oracle)
 }

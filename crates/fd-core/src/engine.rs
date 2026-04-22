@@ -169,13 +169,28 @@ fn apply_transfer(store: &ObjectStore, state: &mut LedgerState, tx: &TransferInt
         return Err(FdError::InsufficientBalance);
     }
 
-    let sender_rebate = tx.amount / 50;
-    let merchant_rebate = if is_merchant(store, state, &tx.to_key)? { tx.amount / 50 } else { 0 };
+    let treasury_account = state.reward_config.treasury_account.clone();
+    let user_p2p_bps = state.reward_config.user_p2p_bps;
+    let user_spend_bps = state.reward_config.user_spend_bps;
+    let vendor_spend_bps = state.reward_config.vendor_spend_bps;
+    let is_vendor = is_merchant(store, state, &tx.to_key)?;
+    let user_bps = if is_vendor { user_spend_bps } else { user_p2p_bps };
+    let vendor_bps = if is_vendor { vendor_spend_bps } else { 0 };
+
+    let sender_rebate = (tx.amount as u128 * user_bps as u128 / 10_000) as u64;
+    let merchant_rebate = (tx.amount as u128 * vendor_bps as u128 / 10_000) as u64;
+    let total_reward = sender_rebate + merchant_rebate;
+
+    if !state.accounts.contains_key(&treasury_account) {
+        return Err(FdError::TreasuryNotFound);
+    }
+    if state.account_or_default(&treasury_account).balance < total_reward {
+        return Err(FdError::InsufficientTreasury);
+    }
 
     {
         let from_mut = state.materialize_account_mut(&tx.from_key);
         from_mut.balance -= tx.amount;
-        from_mut.balance += sender_rebate;
         from_mut.next_nonce += 1;
     }
     {
@@ -184,6 +199,14 @@ fn apply_transfer(store: &ObjectStore, state: &mut LedgerState, tx: &TransferInt
         if merchant_rebate > 0 {
             to_mut.balance += merchant_rebate;
         }
+    }
+    if sender_rebate > 0 || merchant_rebate > 0 {
+        let treasury_mut = state.materialize_account_mut(&treasury_account);
+        treasury_mut.balance -= total_reward;
+    }
+    if sender_rebate > 0 {
+        let from_mut = state.materialize_account_mut(&tx.from_key);
+        from_mut.balance += sender_rebate;
     }
     Ok(())
 }

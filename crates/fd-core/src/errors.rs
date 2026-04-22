@@ -24,6 +24,10 @@ pub enum FdError {
     DuplicateValues(String),
     #[error("account has insufficient balance")]
     InsufficientBalance,
+    #[error("treasury account not found")]
+    TreasuryNotFound,
+    #[error("treasury has insufficient balance")]
+    InsufficientTreasury,
     #[error("invalid nonce: expected {expected}, got {actual}")]
     InvalidNonce { expected: u64, actual: u64 },
     #[error("self transfer is not allowed")]
