@@ -507,3 +507,53 @@ All transports feed the same canonical logic:
 
 ---
 
+
+
+---
+
+## HTTP Event Ingestion (Direct Routing)
+
+HTTP ingestion can now write directly into a registry or node watch directory.
+
+### Start HTTP with Ingest Target
+
+    cargo run -p fd-cli -- \
+      fd-http \
+      --bind 127.0.0.1:8083 \
+      --registry registry.json \
+      --ingest-dir ./registry_events
+
+### Send Event
+
+    curl -X POST http://127.0.0.1:8083/ingest \
+      -H 'content-type: application/json' \
+      --data-binary @examples/transfer_alice_candidate_a.json
+
+Behavior:
+- validates JSON event
+- computes event_hash
+- writes to target directory as:
+
+    <event_hash>.json
+
+- immediately visible to registry/node
+
+---
+
+### Updated Flow
+
+    Client → HTTP (/ingest) → Watch Dir → Registry → Node → State
+
+No intermediate staging directory required.
+
+---
+
+### Properties
+
+- transport-independent ingestion
+- deterministic file naming (event_hash)
+- immediate integration with existing pipeline
+- no duplication or race conditions
+
+---
+
