@@ -102,6 +102,8 @@ enum Command {
         state_out: PathBuf,
         #[arg(long)]
         receipts: PathBuf,
+        #[arg(long)]
+        registry: Option<PathBuf>,
     },
     FdRegistry {
         #[arg(long)]
@@ -180,7 +182,7 @@ fn main() -> Result<()> {
             let new_state: LedgerState = read_json(&new_state)?;
             print_diff_human(&old_state, &new_state)?;
         }
-        Command::FdNode { watch, genesis, objects, state_out, receipts } => {
+        Command::FdNode { watch, genesis, objects, state_out, receipts, registry } => {
             let mut state: LedgerState = if state_out.exists() {
                 read_json(&state_out)?
             } else {
@@ -204,6 +206,11 @@ fn main() -> Result<()> {
             };
 
             loop {
+                let registry_state: Option<RegistryState> = match &registry {
+                    Some(registry_path) if registry_path.exists() => Some(read_json(registry_path)?),
+                    Some(_) => None,
+                    None => None,
+                };
                 for entry in std::fs::read_dir(&watch)? {
                     let entry = entry?;
                     let path = entry.path();
@@ -216,6 +223,36 @@ fn main() -> Result<()> {
                     }
 
                     let event: Event = read_json(&path)?;
+
+                    if let Some(reg) = &registry_state {
+                        let effect_kind = match &event {
+                            Event::Deposit(_) => "deposit",
+                            Event::Transfer(_) => "transfer",
+                        };
+                        let ck = conflict_key(&event);
+                        let eh = event_hash(&event).0;
+                        let map_key = format!("{}:{}", effect_kind, ck);
+
+                        match reg.entries.get(&map_key) {
+                            Some(entry) if entry.event_hash == eh => {}
+                            Some(_) => {
+                                println!("Skipped (non-canonical): {}", path.display());
+                                processed.insert(key);
+                                std::fs::write(&processed_path, serde_json::to_string_pretty(&processed)?)
+                                    .with_context(|| format!("failed to write {}", processed_path.display()))?;
+                                continue;
+                            }
+                            None => {
+                                println!("Skipped (not registered): {}", path.display());
+                                processed.insert(key);
+                                std::fs::write(&processed_path, serde_json::to_string_pretty(&processed)?)
+                                    .with_context(|| format!("failed to write {}", processed_path.display()))?;
+                                continue;
+                            }
+                        }
+                    }
+
+                    let event: Event = event;
                     match fd_core::apply_event(&store, &manifest, &state, &event) {
                         Ok(result) => {
                             state = result.state;
