@@ -921,3 +921,30 @@ Send transfer:
 
 ---
 
+
+
+### Auto Nonce (Wallet UX)
+
+The wallet supports automatic nonce resolution:
+
+    fd-wallet send \
+      --wallet wallet.json \
+      --base-url http://127.0.0.1:8085 \
+      --to <recipient_pubkey> \
+      --amount 100 \
+      --auto-nonce
+
+Behavior:
+- Fetches `/v1/state`
+- Reads `next_nonce` for the wallet address
+- Uses it for signing
+
+Manual override remains available:
+
+    fd-wallet send ... --nonce 3
+
+### Recommendation
+
+Use `--auto-nonce` for normal operation.
+Use explicit `--nonce` only for debugging or replay scenarios.
+
