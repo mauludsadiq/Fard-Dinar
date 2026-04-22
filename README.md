@@ -614,3 +614,64 @@ Next moves:
 3. move node/registry peer sync to prefer /v1 endpoints
 4. then freeze the wire contract in code
 
+
+
+---
+
+## HTTP Response Format (Deterministic)
+
+All HTTP endpoints now return canonical JSON responses.
+
+### Success
+
+    {
+      "ok": true
+    }
+
+or (for data endpoints):
+
+    { ...canonical JSON payload... }
+
+### Error
+
+    {
+      "ok": false,
+      "code": "<machine_code>",
+      "error": "<human_message>"
+    }
+
+Examples:
+
+- not found:
+
+    {
+      "ok": false,
+      "code": "not_found",
+      "error": "not found"
+    }
+
+- configuration error:
+
+    {
+      "ok": false,
+      "code": "objects_not_configured",
+      "error": "objects not configured"
+    }
+
+- ingest error:
+
+    {
+      "ok": false,
+      "code": "no_ingest_dir",
+      "error": "no ingest dir configured"
+    }
+
+### Properties
+
+- no plain-text responses
+- stable machine-readable error codes
+- deterministic JSON formatting
+- uniform across all endpoints
+
+---
+
