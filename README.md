@@ -465,13 +465,13 @@ Example:
 
 ### HTTP Registry Sync
 
-Registries can pull from HTTP peers:
+Registries should prefer versioned endpoints:
 
     cargo run -p fd-cli -- \
       fd-registry \
       --watch ./registry_events \
       --registry-out registry_b.json \
-      --peer-registry http://127.0.0.1:8081/registry
+      --peer-registry http://127.0.0.1:8081/v1/registry
 
 Behavior:
 - fetches JSON over HTTP
@@ -565,6 +565,14 @@ No intermediate staging directory required.
 
 Current HTTP endpoints:
 
+- GET /v1/info
+- GET /v1/registry
+- GET /v1/state
+- GET /v1/objects/<hash>
+- GET /v1/receipts/<run_id>
+- POST /v1/events
+
+Legacy compatibility aliases remain available:
 - GET /info
 - GET /registry
 - GET /state
@@ -585,12 +593,12 @@ Example:
 
 Example queries:
 
-    curl http://127.0.0.1:8084/info
-    curl http://127.0.0.1:8084/registry
-    curl http://127.0.0.1:8084/state
-    curl http://127.0.0.1:8084/objects/ahd1024:72456d65ef7adfa93a7295d48532c8d4b1e604d29371cc4a82ad04e1816232d7
-    curl http://127.0.0.1:8084/receipts/ahd1024:60359a4106309b79c4f82ea5a6cda100665da0e9527aef793787f26992773abe
-    curl -X POST http://127.0.0.1:8084/ingest \
+    curl http://127.0.0.1:8084/v1/info
+    curl http://127.0.0.1:8084/v1/registry
+    curl http://127.0.0.1:8084/v1/state
+    curl http://127.0.0.1:8084/v1/objects/ahd1024:72456d65ef7adfa93a7295d48532c8d4b1e604d29371cc4a82ad04e1816232d7
+    curl http://127.0.0.1:8084/v1/receipts/ahd1024:60359a4106309b79c4f82ea5a6cda100665da0e9527aef793787f26992773abe
+    curl -X POST http://127.0.0.1:8084/v1/events \
       -H 'content-type: application/json' \
       --data-binary @examples/transfer_alice_candidate_a.json
 
