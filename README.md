@@ -1018,3 +1018,57 @@ This is the first complete POS loop.
 
 ---
 
+
+
+---
+
+## FD-VENDOR v0.4 (POS + Merchant Ops)
+
+The vendor CLI now provides a complete merchant operations surface.
+
+### Commands
+
+Request payment:
+
+    fd-vendor request-payment --amount 100 --memo coffee --out request.json
+
+Verify receipt:
+
+    fd-vendor verify-receipt --run-id <id> --amount 100 ...
+
+Inbox (ledger view):
+
+    fd-vendor inbox       --vendor vendor.json       --receipts-dir peer_node_receipts_b       --events-dir peer_node_events_b
+
+Summary (P&L):
+
+    fd-vendor summary       --vendor vendor.json       --receipts-dir peer_node_receipts_b       --events-dir peer_node_events_b
+
+POS (live terminal):
+
+    fd-vendor pos       --vendor vendor.json       --receipts-dir peer_node_receipts_b       --events-dir peer_node_events_b
+
+Example POS output:
+
+    [PAYMENT] amount=2000 from=8a88e3dd... user_reward=40 vendor_reward=40 run_id=ahd1024:...
+
+### Properties
+
+- Fully deterministic (filesystem + canonical receipts)
+- No database required
+- No server-side state
+- Works offline against synced receipt/event stores
+- Vendor rewards visible immediately
+
+### End-to-End Merchant Flow
+
+    fd-vendor request-payment --out request.json
+    fd-wallet pay-request --file request.json --auto-nonce
+    fd-vendor pos
+    fd-vendor inbox
+    fd-vendor summary
+
+This is the first complete merchant payment + accounting loop.
+
+---
+
