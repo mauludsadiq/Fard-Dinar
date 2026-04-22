@@ -436,3 +436,74 @@ Properties:
 
 ---
 
+
+
+---
+
+## HTTP Transport
+
+FD supports network-based registry sync and state access.
+
+### Start HTTP Server
+
+    cargo run -p fd-cli -- \
+      fd-http \
+      --bind 127.0.0.1:8081 \
+      --registry registry.json \
+      --state state.json
+
+Endpoints:
+
+- GET /registry → returns RegistryState
+- GET /state → returns LedgerState
+
+Example:
+
+    curl http://127.0.0.1:8081/registry
+
+---
+
+### HTTP Registry Sync
+
+Registries can pull from HTTP peers:
+
+    cargo run -p fd-cli -- \
+      fd-registry \
+      --watch ./registry_events \
+      --registry-out registry_b.json \
+      --peer-registry http://127.0.0.1:8081/registry
+
+Behavior:
+- fetches JSON over HTTP
+- merges with local registry
+- deterministic convergence via min(event_hash)
+
+---
+
+### Hybrid Topology
+
+You can mix transports:
+
+    peer-registry:
+      - ./local_registry.json
+      - http://peer1:8081/registry
+      - http://peer2:8081/registry
+
+System remains:
+- deterministic
+- eventually consistent
+- transport-agnostic
+
+---
+
+### Architecture
+
+    Filesystem ←→ HTTP ←→ Node/Registry
+
+All transports feed the same canonical logic:
+- conflict_key
+- event_hash ordering
+- deterministic merge
+
+---
+
