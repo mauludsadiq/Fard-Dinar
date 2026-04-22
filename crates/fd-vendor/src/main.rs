@@ -50,6 +50,14 @@ enum Command {
         #[arg(long)]
         events_dir: PathBuf,
     },
+    Pos {
+        #[arg(long)]
+        vendor: PathBuf,
+        #[arg(long)]
+        receipts_dir: PathBuf,
+        #[arg(long)]
+        events_dir: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -211,6 +219,74 @@ fn main() -> Result<()> {
                 "average_payment": average_payment
             }))?);
         }
+
+        Command::Pos {
+            vendor,
+            receipts_dir,
+            events_dir,
+        } => {
+            let vendor_pubkey = load_public_key(&vendor)?;
+            let mut seen = std::collections::HashSet::new();
+
+            loop {
+                for entry in fs::read_dir(&receipts_dir)? {
+                    let entry = entry?;
+                    let path = entry.path();
+                    if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                        continue;
+                    }
+
+                    let receipt: fd_core::Receipt = match serde_json::from_slice(
+                        &fs::read(&path)?
+                    ) {
+                        Ok(r) => r,
+                        Err(_) => continue,
+                    };
+
+                    if seen.contains(&receipt.run_id) {
+                        continue;
+                    }
+
+                    let event_file = events_dir.join(format!(
+                        "{}.json",
+                        receipt.input_hash.replace(":", "_")
+                    ));
+
+                    if !event_file.exists() {
+                        continue;
+                    }
+
+                    let event: serde_json::Value = match serde_json::from_slice(
+                        &fs::read(&event_file)?
+                    ) {
+                        Ok(e) => e,
+                        Err(_) => continue,
+                    };
+
+                    let to = event.get("to").and_then(|v| v.as_str());
+                    if to != Some(vendor_pubkey.as_str()) {
+                        continue;
+                    }
+
+                    let from = event.get("from").and_then(|v| v.as_str()).unwrap_or("");
+                    let amount = event.get("amount").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let (user_reward, vendor_reward) = receipt.transfer_effects
+                        .as_ref()
+                        .map(|fx| (fx.user_reward, fx.vendor_reward))
+                        .unwrap_or((0, 0));
+
+                    println!(
+                        "[PAYMENT] amount={} from={} user_reward={} vendor_reward={} run_id={}",
+                        amount, from, user_reward, vendor_reward, receipt.run_id
+                    );
+
+                    seen.insert(receipt.run_id);
+                }
+
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+        }
+
     }
     Ok(())
 }
