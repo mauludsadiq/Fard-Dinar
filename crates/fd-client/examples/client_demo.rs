@@ -18,4 +18,12 @@ fn main() {
         0,
     );
     println!("signed transfer: {}", serde_json::to_string_pretty(&tx).unwrap());
+
+    let submit = client.submit_signed_transfer(
+        &wallet,
+        "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1",
+        2000,
+        0,
+    ).unwrap();
+    println!("submit signed transfer: {}", submit);
 }

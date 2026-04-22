@@ -119,6 +119,35 @@ impl Client {
         self.get_json(&format!("/v1/objects/{}", hash))
     }
 
+    
+    pub fn submit_signed_transfer(
+        &self,
+        wallet: &Wallet,
+        to: &str,
+        amount: u64,
+        nonce: u64,
+    ) -> Result<serde_json::Value> {
+        let evt = wallet.build_signed_transfer_event(to, amount, nonce);
+        self.submit_event(&evt)
+    }
+
+    pub fn submit_signed_deposit(
+        &self,
+        wallet: &Wallet,
+        beneficiary: &str,
+        usd_cents: u64,
+        external_ref: &str,
+        timestamp: u64,
+    ) -> Result<serde_json::Value> {
+        let evt = wallet.build_signed_deposit_event(
+            beneficiary,
+            usd_cents,
+            external_ref,
+            timestamp,
+        );
+        self.submit_event(&evt)
+    }
+
     pub fn get_info(&self) -> Result<serde_json::Value> {
         self.get_json("/v1/info")
     }
