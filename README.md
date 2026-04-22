@@ -675,3 +675,51 @@ Examples:
 
 ---
 
+
+
+---
+
+## Treasury-Backed Rewards (FD-CORE v1.1.0)
+
+Transfers now use a configurable, treasury-funded reward model.
+
+### RewardConfig
+
+Defined in genesis and carried in state:
+
+    {
+      "user_p2p_bps": 200,
+      "user_spend_bps": 200,
+      "vendor_spend_bps": 200,
+      "treasury_account": "<public_key_hex>"
+    }
+
+- `bps` = basis points (1/100 of a percent)
+- 200 bps = 2%
+
+### Semantics
+
+For a transfer `amount = A`:
+
+- Determine if recipient is a registered merchant.
+- Compute:
+  - `user_reward = floor(A * user_bps / 10_000)`
+  - `vendor_reward = floor(A * vendor_bps / 10_000)` (merchant only)
+- Debit total rewards from `treasury_account`.
+- Apply:
+  - sender: `-A + user_reward`
+  - recipient: `+A (+ vendor_reward if merchant)`
+
+### Guards
+
+- `TreasuryNotFound` if treasury account is missing
+- `InsufficientTreasury` if treasury balance < total rewards
+
+### Properties
+
+- No implicit minting (supply-conserving except via treasury policy)
+- Fully deterministic (included in state and receipts)
+- Tunable via genesis/state without code changes
+
+---
+
