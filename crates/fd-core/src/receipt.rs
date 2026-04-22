@@ -1,4 +1,4 @@
-use crate::{canonical_json_bytes, sha256_tagged, Event, LedgerState, Receipt};
+use crate::{canonical_json_bytes, sha256_tagged, Event, LedgerState, Receipt, TransferEffects};
 use serde::Serialize;
 
 pub fn build_receipt<P: Serialize>(
@@ -22,6 +22,31 @@ pub fn build_receipt<P: Serialize>(
     let trace_hash = sha256_tagged(trace_bytes).0;
     let run_id = trace_hash.clone();
 
+    let transfer_effects = match event {
+        Event::Transfer(tx) => {
+            let pre_from = pre_state.account_or_default(&tx.from_key);
+            let post_from = post_state.account_or_default(&tx.from_key);
+            let pre_to = pre_state.account_or_default(&tx.to_key);
+            let post_to = post_state.account_or_default(&tx.to_key);
+
+            let user_reward = post_from
+                .balance
+                .saturating_add(tx.amount)
+                .saturating_sub(pre_from.balance);
+            let recipient_delta = post_to.balance.saturating_sub(pre_to.balance);
+            let vendor_reward = recipient_delta.saturating_sub(tx.amount);
+            let is_merchant = vendor_reward > 0;
+
+            Some(TransferEffects {
+                amount: tx.amount,
+                user_reward,
+                vendor_reward,
+                is_merchant,
+            })
+        }
+        Event::Deposit(_) => None,
+    };
+
     Receipt {
         run_id,
         program_hash: program_hash.0,
@@ -29,5 +54,6 @@ pub fn build_receipt<P: Serialize>(
         pre_state_hash,
         post_state_hash,
         trace_hash,
+        transfer_effects,
     }
 }

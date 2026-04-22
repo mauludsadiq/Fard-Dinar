@@ -102,6 +102,14 @@ pub struct RegistryState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransferEffects {
+    pub amount: u64,
+    pub user_reward: u64,
+    pub vendor_reward: u64,
+    pub is_merchant: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Receipt {
     pub run_id: String,
     pub program_hash: String,
@@ -109,6 +117,7 @@ pub struct Receipt {
     pub pre_state_hash: String,
     pub post_state_hash: String,
     pub trace_hash: String,
+    pub transfer_effects: Option<TransferEffects>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
