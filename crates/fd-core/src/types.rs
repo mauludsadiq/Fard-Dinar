@@ -85,6 +85,12 @@ pub struct RegistryEntry {
     pub run_id: String,
 }
 
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RegistryState {
+    pub entries: BTreeMap<String, RegistryEntry>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Receipt {
     pub run_id: String,

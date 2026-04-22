@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use ed25519_dalek::{Signer, SigningKey};
-use fd_core::{deposit_signing_payload, transfer_signing_payload, verify_consistency, verify_replay, verify_transition, DepositAttestation, Event, GenesisConfiguration, LedgerState, ObjectStore, ProgramManifest, Receipt, TransferIntent};
+use fd_core::{conflict_key, deposit_signing_payload, event_hash, transfer_signing_payload, verify_consistency, verify_replay, verify_transition, DepositAttestation, Event, GenesisConfiguration, LedgerState, ObjectStore, ProgramManifest, Receipt, RegistryEntry, RegistryState, TransferIntent};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs;
@@ -102,6 +102,12 @@ enum Command {
         state_out: PathBuf,
         #[arg(long)]
         receipts: PathBuf,
+    },
+    FdRegistry {
+        #[arg(long)]
+        watch: PathBuf,
+        #[arg(long)]
+        registry_out: PathBuf,
     },
 
     WalletSignDeposit {
@@ -242,6 +248,78 @@ fn main() -> Result<()> {
                     std::fs::write(&processed_path, serde_json::to_string_pretty(&processed)?)
                         .with_context(|| format!("failed to write {}", processed_path.display()))?;
                 }
+
+                thread::sleep(Duration::from_millis(500));
+            }
+        }
+        Command::FdRegistry { watch, registry_out } => {
+            let processed_path = registry_out.with_extension("processed.json");
+            let mut processed: std::collections::BTreeSet<String> = if processed_path.exists() {
+                read_json(&processed_path)?
+            } else {
+                std::collections::BTreeSet::new()
+            };
+            let mut registry: RegistryState = if registry_out.exists() {
+                read_json(&registry_out)?
+            } else {
+                RegistryState { entries: BTreeMap::new() }
+            };
+
+            loop {
+                let mut changed = false;
+                let mut events = Vec::new();
+
+                for entry in std::fs::read_dir(&watch)? {
+                    let entry = entry?;
+                    let path = entry.path();
+                    if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                        continue;
+                    }
+                    let key = path.to_string_lossy().to_string();
+                    if processed.contains(&key) {
+                        continue;
+                    }
+                    let event: Event = read_json(&path)?;
+                    events.push((key, event));
+                }
+
+                for (key, event) in events {
+                    let effect_kind = match &event {
+                        Event::Deposit(_) => "deposit".to_string(),
+                        Event::Transfer(_) => "transfer".to_string(),
+                    };
+                    let ck = conflict_key(&event);
+                    let eh = event_hash(&event).0;
+                    let map_key = format!("{}:{}", effect_kind, ck);
+                    let prior = registry.entries.get(&map_key).cloned();
+                    let should_update = match &prior {
+                        Some(existing) => eh < existing.event_hash,
+                        None => true,
+                    };
+                    if should_update {
+                        registry.entries.insert(map_key, RegistryEntry {
+                            effect_kind,
+                            conflict_key: ck,
+                            event_hash: eh.clone(),
+                            run_id: String::new(),
+                        });
+                        changed = true;
+                        match prior {
+                            None => println!("Registry accepted: {}", eh),
+                            Some(existing) => println!("Registry replaced: {} -> {}", existing.event_hash, eh),
+                        }
+                    } else {
+                        println!("Registry ignored: {}", eh);
+                    }
+                    processed.insert(key);
+                }
+
+                if changed {
+                    std::fs::write(&registry_out, serde_json::to_string_pretty(&registry)?)
+                        .with_context(|| format!("failed to write {}", registry_out.display()))?;
+                }
+                std::fs::write(&processed_path, serde_json::to_string_pretty(&processed)?)
+                    .with_context(|| format!("failed to write {}", processed_path.display()))?;
 
                 thread::sleep(Duration::from_millis(500));
             }

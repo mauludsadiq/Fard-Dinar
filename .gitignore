@@ -13,3 +13,7 @@ node_events/
 node_receipts/
 node_state.json
 node_state.processed.json
+
+registry_events/
+registry_state.json
+registry_state.processed.json
