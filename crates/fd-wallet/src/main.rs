@@ -40,7 +40,9 @@ enum Command {
         #[arg(long)]
         amount: u64,
         #[arg(long)]
-        nonce: u64,
+        nonce: Option<u64>,
+        #[arg(long, default_value_t = false)]
+        auto_nonce: bool,
     },
 }
 
@@ -82,10 +84,17 @@ fn main() -> Result<()> {
             to,
             amount,
             nonce,
+            auto_nonce,
         } => {
             let wallet = load_wallet(&wallet)?;
             let client = Client::new(&base_url);
-            let res = client.submit_signed_transfer(&wallet, &to, amount, nonce)?;
+            let resolved_nonce = if auto_nonce {
+                let state = client.get_state()?;
+                state.account_or_default(&wallet.public_key_hex()).next_nonce
+            } else {
+                nonce.context("missing --nonce (or pass --auto-nonce)")?
+            };
+            let res = client.submit_signed_transfer(&wallet, &to, amount, resolved_nonce)?;
             println!("{}", serde_json::to_string_pretty(&res)?);
         }
     }
