@@ -152,6 +152,20 @@ cargo run -p fd-cli -- \
   --repo .
 ```
 
+### Apply a single event and materialize state
+
+```bash
+cargo run -p fd-cli -- \
+  fd-apply \
+  --event examples/deposit_alice.json \
+  --pre-state examples/pre_state_genesis.json \
+  --objects examples/objects \
+  --out state.json \
+  --repo .
+```
+
+This command writes the full post-state to `--out` and prints the receipt JSON to stdout. You can chain multiple events by feeding the emitted state file into the next `fd-apply` invocation.
+
 ### Check canonical consistency only
 
 ```bash

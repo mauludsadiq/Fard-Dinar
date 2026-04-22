@@ -41,6 +41,18 @@ enum Command {
         #[arg(long)]
         events: PathBuf,
     },
+    FdApply {
+        #[arg(long)]
+        event: PathBuf,
+        #[arg(long)]
+        pre_state: PathBuf,
+        #[arg(long)]
+        objects: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -67,6 +79,17 @@ fn main() -> Result<()> {
             let events: Vec<Event> = read_json(&events)?;
             let out = verify_consistency(&events)?;
             print_json(&out)?;
+        }
+        Command::FdApply { event, pre_state, objects, out, repo } => {
+            let event: Event = read_json(&event)?;
+            let pre_state: LedgerState = read_json(&pre_state)?;
+            let store = ObjectStore::new(objects);
+            let manifest = build_program_manifest(&repo)?;
+            let result = fd_core::apply_event(&store, &manifest, &pre_state, &event)?;
+            let state_json = serde_json::to_string_pretty(&result.state)?;
+            std::fs::write(&out, state_json)
+                .with_context(|| format!("failed to write {}", out.display()))?;
+            print_json(&result.receipt)?;
         }
     }
     Ok(())

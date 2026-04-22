@@ -1,5 +1,5 @@
 use ed25519_dalek::{Signer, SigningKey};
-use fd_core::{apply_event, canonical_event_set, deposit_signing_payload, event_hash, replay_events, transfer_signing_payload, Account, DepositAttestation, Event, GenesisConfiguration, LedgerState, MerchantRegistrySnapshot, ObjectStore, OracleSetSnapshot, ProgramManifest, TransferIntent};
+use fd_core::{apply_event, canonical_event_set, deposit_signing_payload, event_hash, replay_events, transfer_signing_payload, DepositAttestation, Event, LedgerState, MerchantRegistrySnapshot, ObjectStore, OracleSetSnapshot, ProgramManifest, TransferIntent};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;

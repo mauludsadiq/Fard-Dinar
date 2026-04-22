@@ -1,0 +1,13 @@
+{
+  "accounts": {
+    "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c": {
+      "balance": 10000,
+      "next_nonce": 0
+    }
+  },
+  "consumed_deposits": [
+    "sha256:9603d04aef3177260b73478543b40ad7a9e70a24b3baa06a028428d7b9419218"
+  ],
+  "merchant_registry_hash": "sha256:c4306299c9061f40375091ea022c7912b89c60dbd2a4d26ca62c34433bc03682",
+  "oracle_set_hash": "sha256:e8c9c7f1e0c2548d70ff5c3786a27dd34ae354dd9132dc88420af15cba2caffc"
+}
