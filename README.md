@@ -1,124 +1,70 @@
 # Fard Dinar
 
-Fard Dinar is a deterministic monetary engine. Every execution produces an AHD-1024-256 receipt committing to inputs, state transitions, and outputs. Two replays of the same events on the same genesis produce the same final state hash — on any machine, at any time.
+A deterministic monetary engine. Every execution produces an AHD-1024-256 receipt committing to inputs, state, and outputs. Same events, same genesis, same machine or different — identical final state hash, every time.
 
-## Implementation
+---
 
-The engine is implemented in two layers:
+## Stack
 
-| Layer | Language | Purpose |
-|---|---|---|
-| `fard/` | FARD v1.7.0 | Full engine, CLI programs, wallet |
-| AHD-1024 | Rust | Cryptographic hash primitive only |
+| Layer | What it is |
+|---|---|
+| `fard/` | The engine, wallet, and vendor tooling — pure FARD v1.7.0 |
+| AHD-1024 | The hash function — a 1600-bit sponge, called as a subprocess |
 
-760 lines of FARD replace 1,547 lines of Rust — a 51% reduction. The only Rust remaining is the AHD-1024 binary, called as a subprocess for hashing.
+760 lines of FARD. The only Rust is the AHD-1024 binary.
 
-## Dependencies
+---
 
-- [fardrun](https://github.com/mauludsadiq/FARD) v1.7.0
-- [AHD-1024](https://github.com/mauludsadiq/AHD_1024) compiled binary
+## Setup
 
-Install fardrun:
+**1. Install fardrun**
 
     curl -sf https://raw.githubusercontent.com/mauludsadiq/FARD/main/install.sh | sh
 
-Build AHD binary:
+**2. Build AHD**
 
     git clone https://github.com/mauludsadiq/AHD_1024
     cd AHD_1024 && cargo build --release
 
-Set the AHD binary path in `fard/lib/hashes.fard`:
+**3. Set the path in `fard/lib/hashes.fard`**
 
     let AHD_BIN = "/path/to/AHD_1024/target/release/ahd_1024"
 
-## Repository layout
+---
 
-    fard/
-    ├── lib/
-    │   ├── hashes.fard    — AHD-1024-256 tagged hashing
-    │   ├── canon.fard     — canonical JSON (sorted keys, no whitespace)
-    │   ├── crypto.fard    — Ed25519 sign and verify
-    │   ├── store.fard     — content-addressed object store
-    │   ├── engine.fard    — deposit, transfer, replay, conflict resolution
-    │   ├── receipt.fard   — transition receipt construction
-    │   └── args.fard      — CLI flag parsing
-    ├── bin/
-    │   ├── fd_replay.fard
-    │   ├── fd_apply.fard
-    │   ├── fd_consistency.fard
-    │   ├── fd_supply.fard
-    │   ├── fd_diff.fard
-    │   ├── wallet_gen.fard
-    │   ├── wallet_sign_transfer.fard
-    │   └── wallet_sign_deposit.fard
-    └── tests/
-        ├── test_foundation.fard   — 7 tests: hashes, canon, crypto
-        └── test_engine.fard       — 7 tests: store, engine, replay
-    examples/
-    ├── genesis.json               — zero-reward genesis
-    ├── genesis_rewards.json       — treasury-backed 200bps rewards
-    ├── events.json                — example event set (5 events, 4 canonical)
-    └── objects/                   — content-addressed registry snapshots
+## How money moves
 
-## Implemented monetary rules
+**Deposit** — an authorized oracle signs an attestation. FD is minted 1:1 against `usd_cents`. The deposit ID is marked consumed so it cannot be replayed.
 
-### Deposit issuance
+**Transfer** — sender signs a canonical payload. The engine checks nonce, balance, and signature. Rewards flow from the treasury:
 
-A deposit attestation signed by an authorized oracle mints FD 1:1 against `usd_cents` and marks the deposit ID as consumed.
+- sender gets `floor(amount × user_bps / 10000)`
+- merchant recipient gets `floor(amount × vendor_bps / 10000)`
 
-### Transfer semantics
+**Conflict resolution** — when two events compete for the same slot `(from, nonce)` or the same `deposit_id`, the one with the lexicographically smallest `event_hash` wins. Canonical replay always produces deposits first, then transfers, both sorted deterministically.
 
-For a transfer of amount `A` with reward config `user_bps` and `vendor_bps`:
+---
 
-- sender balance decreases by `A`
-- sender receives rebate `floor(A * user_bps / 10000)` from treasury
-- recipient receives `A`
-- recipient receives additional `floor(A * vendor_bps / 10000)` from treasury when registered as a merchant
-- sender nonce increments by exactly one
+## Running
 
-### Conflict resolution
+Every program follows the same pattern:
 
-Conflicts are resolved on canonical `event_hash`:
+    fardrun run --program fard/bin/<name>.fard --out ./out -- <flags>
 
-- transfers conflict on `(from, nonce)`
-- deposits conflict on `deposit_id`
-- the winning event is the lexicographically smallest `event_hash`
+Result is always in `./out/result.json`.
 
-### Replay order
+### Engine
 
-Canonical replay order is:
-
-- deposits before transfers
-- deposits sorted by `(beneficiary, external_ref, event_hash)`
-- transfers sorted by `(from, nonce, event_hash)`
-
-### Consumed deposits
-
-Consumed deposit IDs are stored in lexicographic order (equivalent to Rust `BTreeSet`), ensuring deterministic state across implementations.
-
-### Determinism
-
-The engine uses canonical JSON everywhere consensus depends on bytes: event hashes, signing payloads, registry loading verification, receipt input hashing, and final replay state hashing. All hashes use AHD-1024-256 with the `ahd1024:` tag prefix.
-
-## Tests
-
-    fardrun test --program fard/tests/test_foundation.fard
-    fardrun test --program fard/tests/test_engine.fard
-
-14 tests total. The engine test suite verifies the final replay state hash against the known value `ahd1024:b350cffb...`.
-
-## CLI programs
-
-### Replay the full example ledger
+**Replay a full ledger**
 
     fardrun run --program fard/bin/fd_replay.fard --out ./out -- \
       --genesis examples/genesis_rewards.json \
       --events  examples/events.json \
       --objects examples/objects
 
-Output: `{ final_state_hash, supply, event_count, ok }`
+    # { final_state_hash, supply, event_count, ok }
 
-### Apply a single event
+**Apply one event**
 
     fardrun run --program fard/bin/fd_apply.fard --out ./out -- \
       --event     examples/deposit_bob.json \
@@ -126,25 +72,30 @@ Output: `{ final_state_hash, supply, event_count, ok }`
       --objects   examples/objects \
       --out       state.json
 
-Writes post-state to `--out` and prints the receipt.
+Writes post-state to `--out`, prints the receipt. Add `--receipt-out receipt.json` to persist.
 
-### Check canonical consistency
+**Check canonical consistency**
 
     fardrun run --program fard/bin/fd_consistency.fard --out ./out -- \
       --events examples/events.json
 
-### Show total supply
+**Supply**
 
     fardrun run --program fard/bin/fd_supply.fard --out ./out -- \
       --state state.json
 
-### Diff two states
+**Diff two states**
 
     fardrun run --program fard/bin/fd_diff.fard --out ./out -- \
-      --old state_before.json \
-      --new state_after.json
+      --old state_before.json --new state_after.json
 
-### Sign a transfer
+---
+
+### Wallet
+
+Wallet files: `{ "secret_key_hex": "..." }` for signing, `{ "public_key_hex": "..." }` for read-only views.
+
+**Sign a transfer**
 
     fardrun run --program fard/bin/wallet_sign_transfer.fard --out ./out -- \
       --secret wallet.json \
@@ -153,7 +104,7 @@ Writes post-state to `--out` and prints the receipt.
       --nonce  0 \
       --out    transfer.json
 
-### Sign a deposit
+**Sign a deposit**
 
     fardrun run --program fard/bin/wallet_sign_deposit.fard --out ./out -- \
       --secret       oracle_wallet.json \
@@ -163,58 +114,127 @@ Writes post-state to `--out` and prints the receipt.
       --timestamp    1710000000 \
       --out          deposit.json
 
-## Object store
+**Transaction history**
 
-`examples/objects/` is a content-addressed directory. Each file name is the hex portion of a tagged AHD-1024-256 hash. The file bytes are canonical JSON and re-hash to the exact tagged hash referenced by ledger state. The store loader verifies hash, UTF-8, canonical re-serialization, schema, and key uniqueness before any transition can use an object.
+    fardrun run --program fard/bin/wallet_history.fard --out ./out -- \
+      --wallet       wallet_pub.json \
+      --receipts-dir examples/receipts \
+      --events-dir   examples
 
-## Genesis configurations
+    # { public_key_hex, count, history: [{ run_id, kind, direction, counterparty, amount }] }
 
-Two reference genesis configurations are provided:
+**Rewards earned**
 
-`examples/genesis.json` — zero reward rates, no treasury required, backward compatible.
+    fardrun run --program fard/bin/wallet_rewards.fard --out ./out -- \
+      --wallet       wallet_pub.json \
+      --receipts-dir examples/receipts \
+      --events-dir   examples \
+      --state        state.json
 
-`examples/genesis_rewards.json` — 200 bps (2%) reward rates, funded treasury account, full incentive model.
+    # { public_key_hex, total_rewards, by_counterparty }
 
-## Default account semantics
+---
 
-Absent accounts are interpreted as `{ balance: 0, next_nonce: 0 }`. Any write materializes the account in state.
+### Vendor
 
-## Receipt model
+Vendor files: `{ "public_key_hex": "..." }`.
 
-Each accepted transition produces a receipt with: `run_id`, `program_hash`, `input_hash`, `pre_state_hash`, `post_state_hash`, `trace_hash`. All fields are AHD-1024-256 tagged hashes over canonical JSON.
+**Generate a payment request**
+
+    fardrun run --program fard/bin/vendor_request_payment.fard --out ./out -- \
+      --vendor vendor.json \
+      --amount 100 \
+      --memo   coffee \
+      --out    request.json
+
+    # { kind: "fd_payment_request_v1", to, amount, memo, nonce_mode }
+
+**Verify a receipt**
+
+    fardrun run --program fard/bin/vendor_verify_receipt.fard --out ./out -- \
+      --run-id       ahd1024:<hex> \
+      --receipts-dir examples/receipts
+
+**Inbox — all incoming payments**
+
+    fardrun run --program fard/bin/vendor_inbox.fard --out ./out -- \
+      --vendor       vendor.json \
+      --receipts-dir examples/receipts \
+      --events-dir   examples
+
+    # { payment_count, total_received, payments }
+
+**P&L summary**
+
+    fardrun run --program fard/bin/vendor_summary.fard --out ./out -- \
+      --vendor       vendor.json \
+      --receipts-dir examples/receipts \
+      --events-dir   examples \
+      --state        state.json
+
+    # { payment_count, total_received, total_rewards, gross_revenue, current_balance }
+
+**Export to CSV**
+
+    fardrun run --program fard/bin/vendor_export.fard --out ./out -- \
+      --vendor       vendor.json \
+      --receipts-dir examples/receipts \
+      --events-dir   examples \
+      --state        state.json \
+      --out          payments.csv
+
+    # columns: run_id, from, to, amount, vendor_reward
+
+---
+
+## Tests
+
+    fardrun test --program fard/tests/test_foundation.fard
+    fardrun test --program fard/tests/test_engine.fard
+
+14 tests. The engine suite verifies the final replay state hash against the known value `ahd1024:b350cffb...`, byte-for-byte identical to the Rust implementation.
+
+---
+
+## Examples
+
+**`examples/genesis.json`** — zero reward rates, no treasury required.
+
+**`examples/genesis_rewards.json`** — 200 bps (2%) reward rates with a funded treasury. Use this for the full incentive model.
+
+**`examples/events.json`** — 5 events, 4 canonical after conflict resolution.
+
+**`examples/receipts/`** — receipts for all 4 canonical events, generated by `fd_apply`.
+
+**`examples/objects/`** — content-addressed merchant registry and oracle set snapshots. File names are AHD-1024-256 hex. The store verifies hash, canonical re-serialization, and schema before use.
+
+---
+
+## Receipts and the join key
+
+Every `fd_apply` run produces:
+
+    {
+      run_id:          "ahd1024:...",
+      program_hash:    "ahd1024:...",
+      input_hash:      "ahd1024:...",
+      pre_state_hash:  "ahd1024:...",
+      post_state_hash: "ahd1024:...",
+      trace_hash:      "ahd1024:..."
+    }
+
+`input_hash` is `AHD("FD_EVENT_V1" + canonical_json(event))`. It is the join key between a receipt and its source event — how `wallet_history`, `vendor_inbox`, and all downstream views connect receipts to the events that produced them.
+
+---
 
 ## Hashing
 
-This repository uses AHD-1024-256 tagged hashes throughout. The tag prefix is `ahd1024:`. The AHD-1024 hash function is a 1600-bit sponge with 24 rounds — see the [AHD-1024 repository](https://github.com/mauludsadiq/AHD_1024) for the full specification, test vectors, and cryptanalytic results.
+All hashes use AHD-1024-256 with the prefix `ahd1024:`. AHD-1024 is a 1600-bit sponge (rate 1024, capacity 576) with 24 rounds. Three independent implementations — Rust, Python, C — produce bit-identical outputs for all test vectors. See [AHD-1024](https://github.com/mauludsadiq/AHD_1024) for the full specification and cryptanalytic results.
 
-## Design choices
+---
 
-### Why canonical JSON everywhere?
+## Why FARD
 
-The spec is only meaningful if every node signs, hashes, verifies, and replays the exact same bytes. Canonical JSON supplies that invariant for transfer signing payloads, deposit signing payloads, event hashes, registry snapshots, oracle sets, and receipts.
+FARD executions are themselves content-addressed. Every run produces a `fard_run_digest` committing to source, imports, inputs, and result. The engine's determinism guarantee and FARD's execution receipt model are the same invariant expressed at two levels.
 
-### Why conflict resolution on `event_hash`?
-
-A receipt hash includes execution details. The economic identity of an event must be independent of who executed it or how they traced it. Canonical selection is therefore based on event content only.
-
-### Why an object store instead of network fetch?
-
-Consensus logic must not depend on live network IO. The engine resolves content-addressed objects from a local store, verifies them, and then uses them. Distribution is a separate concern from monetary validity.
-
-### Why FARD?
-
-FARD is a deterministic, content-addressed scripting language. Every FARD execution produces a receipt committing to source, imports, inputs, and outputs — the same guarantees Fard Dinar requires from its engine. 760 lines of FARD replace 1,547 lines of Rust with no loss of determinism or verifiability.
-
-## System model
-
-    Signed Intent -> Canonical Event Set -> Engine -> State + Receipts
-
-1. Wallet signs intent using canonical JSON payload
-2. Conflict resolution selects canonical winner per `(effect_kind, conflict_key)`
-3. Engine executes deterministically against verified object store
-4. Receipt commits the transition with AHD-1024-256 hashes
-
-## Packaging
-
-    cd ..
-    zip -r "Fard Dinar.zip" "Fard Dinar"
+760 lines of FARD replace 1,547 lines of Rust. The reduction comes from removing boilerplate, not from cutting features — every monetary rule, conflict resolution path, and receipt field is preserved and verified.
