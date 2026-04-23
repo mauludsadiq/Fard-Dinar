@@ -1098,3 +1098,53 @@ Properties:
 - Suitable for accounting, analytics, and audit
 - Reproducible across nodes
 
+
+
+---
+
+## FD-WALLET v0.3 (User History)
+
+The wallet now provides a deterministic user-side transaction history.
+
+### History
+
+View all transactions involving the wallet:
+
+    fd-wallet history \
+      --wallet wallet.json \
+      --receipts-dir peer_node_receipts_b \
+      --events-dir peer_node_events_b
+
+Output:
+
+    {
+      "public_key_hex": "<wallet_pubkey>",
+      "history": [
+        {
+          "run_id": "...",
+          "direction": "out" | "in",
+          "counterparty": "<pubkey>",
+          "amount": 100,
+          "user_reward": 2,
+          "vendor_reward": 2,
+          "is_merchant": true
+        }
+      ]
+    }
+
+Properties:
+- Deterministic (derived from canonical receipts + events)
+- No database required
+- Shows both incoming and outgoing flows
+- Includes reward attribution
+- Fully reproducible across nodes
+
+### End-to-End User Flow
+
+    fd-wallet pay-request --file request.json --auto-nonce
+    fd-wallet history
+
+This completes the user-side ledger view.
+
+---
+
