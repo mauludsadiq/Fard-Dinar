@@ -1,6 +1,6 @@
 # Fard Dinar
 
-A deterministic monetary engine. Every execution produces an AHD-1024-256 receipt committing to inputs, state, and outputs. Same events, same genesis, same machine or different — identical final state hash, every time.
+A deterministic monetary engine and network. Every execution produces an AHD-1024-256 receipt committing to inputs, state, and outputs. Same events, same genesis, same machine or different — identical final state hash, every time.
 
 ---
 
@@ -66,6 +66,12 @@ The only Rust is the AHD-1024 binary. Everything else is FARD.
     bash examples/network/fard/smoke_test.sh
 
 Starts a registry and node, deposits to alice, generates a QR payment request, wallet pays with auto-nonce, polls to apply, verifies the receipt. Full end-to-end in one command.
+
+**Prove mesh convergence:**
+
+    bash examples/network/fard/mesh_convergence_test.sh
+
+Runs two independent registries and two independent nodes, submits events including a conflicting pair, and verifies that both nodes converge to `ahd1024:b350cffb...` — identical to the offline replay hash.
 
 ---
 
@@ -150,21 +156,24 @@ Writes post-state to `--out`, prints the receipt. Add `--receipt-out receipt.jso
 **Network status**
 
     fardrun run --program fard/bin/fd_net_status.fard --out ./out -- \
-      --topology examples/network/fard/topology_single.json
+      --topology examples/network/fard/topology_mesh.json
 
     # { ok, fully_converged, nodes_converged, registries_converged,
     #   state_hash, registry_hash, nodes: [...], registries: [...] }
 
 **Launchers**
 
-    bash examples/network/fard/single_node.sh       # registry :7371 + node :7370
-    bash examples/network/fard/two_registry.sh      # registry A :7371, B :7373, node B :7372
-    bash examples/network/fard/smoke_test.sh        # full end-to-end test
+    bash examples/network/fard/single_node.sh           # registry :7371 + node :7370
+    bash examples/network/fard/two_registry.sh          # registry A :7371, B :7373, node B :7372
+    bash examples/network/fard/mesh.sh                  # two registries + two nodes
+    bash examples/network/fard/smoke_test.sh            # single-node end-to-end test
+    bash examples/network/fard/mesh_convergence_test.sh # mesh convergence proof
 
 **Topology files**
 
-    examples/network/fard/topology_single.json        # single registry + node
-    examples/network/fard/topology_two_registry.json  # two registries + one node
+    examples/network/fard/topology_single.json        # 1 registry + 1 node
+    examples/network/fard/topology_two_registry.json  # 2 registries + 1 node
+    examples/network/fard/topology_mesh.json          # 2 registries + 2 nodes
 
 ---
 
@@ -275,6 +284,16 @@ The wallet decodes this, resolves the current nonce from the node, signs, and su
 
 14 tests. The engine suite verifies the final replay state hash against `ahd1024:b350cffb...`, byte-for-byte identical to the reference implementation.
 
+The mesh convergence test independently verifies the same hash across two nodes executing through two separate registries.
+
+---
+
+## Specifications
+
+`docs/FD_CORE_SPEC_v1.0.0.md` — monetary rules, event schema, conflict resolution, receipt model.
+
+`docs/FD_NETWORK_SPEC_v1.0.md` — component responsibilities, peer sync protocol, network invariants, failure modes, health model, convergence proof.
+
 ---
 
 ## Examples
@@ -291,7 +310,7 @@ The wallet decodes this, resolves the current nonce from the node, signs, and su
 
 `examples/dev-fixtures.json` — deterministic key seeds for local testing.
 
-`examples/network/fard/` — launchers, smoke test, and topology specs.
+`examples/network/fard/` — launchers, smoke test, convergence test, and topology specs.
 
 ---
 
