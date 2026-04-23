@@ -8,7 +8,7 @@ A deterministic monetary engine. Every execution produces an AHD-1024-256 receip
 
 | Layer | What it is |
 |---|---|
-| `fard/` | Engine, wallet, vendor, network — pure FARD v1.7.0 |
+| `fard/` | Engine, wallet, vendor, network, analytics — pure FARD v1.7.0 |
 | AHD-1024 | Hash function — a 1600-bit sponge, called as a subprocess |
 
 The only Rust is the AHD-1024 binary. Everything else is FARD.
@@ -61,13 +61,21 @@ The only Rust is the AHD-1024 binary. Everything else is FARD.
 
 ---
 
+## Quickstart
+
+    bash examples/network/fard/smoke_test.sh
+
+Starts a registry and node, deposits to alice, generates a QR payment request, wallet pays it with auto-nonce, polls to apply, verifies the receipt. Full end-to-end in one command.
+
+---
+
 ## Running
 
-Every batch program follows the same pattern:
+Every batch program:
 
     fardrun run --program fard/bin/<name>.fard --out ./out -- <flags>
 
-Result is always in `./out/result.json`.
+Result always in `./out/result.json`.
 
 ---
 
@@ -92,85 +100,55 @@ Result is always in `./out/result.json`.
 
 Writes post-state to `--out`, prints the receipt. Add `--receipt-out receipt.json` to persist.
 
-**Check canonical consistency**
+**Consistency, supply, diff**
 
-    fardrun run --program fard/bin/fd_consistency.fard --out ./out -- \
-      --events examples/events.json
-
-**Supply**
-
-    fardrun run --program fard/bin/fd_supply.fard --out ./out -- \
-      --state state.json
-
-**Diff two states**
-
-    fardrun run --program fard/bin/fd_diff.fard --out ./out -- \
-      --old state_before.json --new state_after.json
+    fardrun run --program fard/bin/fd_consistency.fard --out ./out -- --events examples/events.json
+    fardrun run --program fard/bin/fd_supply.fard --out ./out -- --state state.json
+    fardrun run --program fard/bin/fd_diff.fard --out ./out -- --old s1.json --new s2.json
 
 ---
 
 ## Network
 
-**Registry node** — accepts events, resolves conflicts, serves canonical registry over HTTP.
+**Registry** — accepts events, resolves conflicts, serves canonical registry.
 
     fardrun run --program fard/bin/fd_registry.fard --out ./out -- \
-      --watch        ./registry_events \
+      --watch        ./events \
       --registry-out registry.json \
       --bind         127.0.0.1:7371
 
-Endpoints:
-
-    POST /v1/events    — ingest an event (writes to watch dir)
+    POST /v1/events    — ingest an event
     POST /v1/poll      — process watch dir, resolve conflicts
     GET  /v1/registry  — canonical registry state
     GET  /v1/info
 
-**Execution node** — applies canonical events in deterministic order, persists state and receipts.
+**Node** — applies canonical events in deterministic order.
 
     fardrun run --program fard/bin/fd_node.fard --out ./out -- \
-      --watch      ./node_events \
-      --genesis    examples/genesis_rewards.json \
-      --objects    examples/objects \
-      --state-out  state.json \
-      --receipts   ./receipts \
-      --registry   registry.json \
-      --bind       127.0.0.1:7370
-
-Endpoints:
+      --watch     ./events \
+      --genesis   examples/genesis_rewards.json \
+      --objects   examples/objects \
+      --state-out state.json \
+      --receipts  ./receipts \
+      --registry  registry.json \
+      --bind      127.0.0.1:7370
 
     POST /v1/poll            — apply pending canonical events in order
     GET  /v1/state           — current ledger state
     GET  /v1/receipts/<hex>  — receipt by run_id hex
     GET  /v1/info
 
-**Single-node quickstart**
+**Launchers**
 
-    # Terminal 1
-    fardrun run --program fard/bin/fd_registry.fard --out ./out -- \
-      --watch ./events --registry-out registry.json --bind 127.0.0.1:7371
-
-    # Terminal 2
-    fardrun run --program fard/bin/fd_node.fard --out ./out -- \
-      --watch ./events --genesis examples/genesis_rewards.json \
-      --objects examples/objects --state-out state.json \
-      --receipts ./receipts --registry registry.json --bind 127.0.0.1:7370
-
-    # Submit
-    curl -X POST http://127.0.0.1:7371/v1/events \
-      -H 'content-type: application/json' -d @examples/deposit_alice.json
-
-    # Poll both
-    curl -X POST http://127.0.0.1:7371/v1/poll
-    curl -X POST http://127.0.0.1:7370/v1/poll
-
-    # Read state
-    curl http://127.0.0.1:7370/v1/state
+    bash examples/network/fard/single_node.sh     # registry :7371 + node :7370
+    bash examples/network/fard/two_registry.sh    # registry A :7371, B :7373, node B :7372
+    bash examples/network/fard/smoke_test.sh      # full end-to-end test
 
 ---
 
 ## Wallet
 
-Wallet files: `{ "secret_key_hex": "..." }` for signing, `{ "public_key_hex": "..." }` for read-only views.
+Wallet files: `{ "secret_key_hex": "..." }` for signing, `{ "public_key_hex": "..." }` for read-only.
 
 **Sign a transfer**
 
@@ -184,7 +162,7 @@ Wallet files: `{ "secret_key_hex": "..." }` for signing, `{ "public_key_hex": ".
       --usd-cents 10000 --external-ref bank-wire-0001 --timestamp 1710000000 \
       --out deposit.json
 
-**Pay a payment request (QR flow)**
+**Pay a payment request**
 
     fardrun run --program fard/bin/wallet_pay_request.fard --out ./out -- \
       --secret   wallet.json \
@@ -192,21 +170,15 @@ Wallet files: `{ "secret_key_hex": "..." }` for signing, `{ "public_key_hex": ".
       --node-url http://127.0.0.1:7371 \
       --out      payment.json
 
-Decodes the `fdpay:` URI, resolves nonce automatically from the node, signs the transfer, and submits it. Pass `--nonce N` to override.
+Decodes the `fdpay:` URI, resolves nonce from the node automatically, signs and submits. Pass `--nonce N` to override.
 
-**Transaction history**
+**History and rewards**
 
     fardrun run --program fard/bin/wallet_history.fard --out ./out -- \
       --wallet wallet_pub.json --receipts-dir ./receipts --events-dir ./events
 
-    # { public_key_hex, count, history: [{ run_id, kind, direction, counterparty, amount }] }
-
-**Rewards earned**
-
     fardrun run --program fard/bin/wallet_rewards.fard --out ./out -- \
       --wallet wallet_pub.json --receipts-dir ./receipts --events-dir ./events --state state.json
-
-    # { public_key_hex, total_rewards, by_counterparty }
 
 ---
 
@@ -219,40 +191,40 @@ Vendor files: `{ "public_key_hex": "..." }`.
     fardrun run --program fard/bin/vendor_qr.fard --out ./out -- \
       --vendor vendor.json --amount 500 --memo "espresso" --out request.json
 
-Produces a `fdpay:` URI — base64url encoding of the canonical payment request JSON. Display as a QR code or share as a link. The wallet decodes it with `wallet_pay_request`.
+Produces a `fdpay:` URI — base64url of the canonical request JSON. Display as a QR code or share as a link.
+
+**Inbox, summary, export**
+
+    fardrun run --program fard/bin/vendor_inbox.fard --out ./out -- \
+      --vendor vendor.json --receipts-dir ./receipts --events-dir ./events
+
+    fardrun run --program fard/bin/vendor_summary.fard --out ./out -- \
+      --vendor vendor.json --receipts-dir ./receipts --events-dir ./events --state state.json
+
+    fardrun run --program fard/bin/vendor_export.fard --out ./out -- \
+      --vendor vendor.json --receipts-dir ./receipts --events-dir ./events \
+      --state state.json --out payments.csv
 
 **Verify a receipt**
 
     fardrun run --program fard/bin/vendor_verify_receipt.fard --out ./out -- \
       --run-id ahd1024:<hex> --receipts-dir ./receipts
 
-**Inbox — all incoming payments**
+---
 
-    fardrun run --program fard/bin/vendor_inbox.fard --out ./out -- \
-      --vendor vendor.json --receipts-dir ./receipts --events-dir ./events
+## Treasury analytics
 
-    # { payment_count, total_received, payments }
+    fardrun run --program fard/bin/treasury_analytics.fard --out ./out -- \
+      --state        state.json \
+      --genesis      examples/genesis_rewards.json \
+      --events-dir   ./events \
+      --receipts-dir ./receipts
 
-**P&L summary**
-
-    fardrun run --program fard/bin/vendor_summary.fard --out ./out -- \
-      --vendor vendor.json --receipts-dir ./receipts --events-dir ./events --state state.json
-
-    # { payment_count, total_received, total_rewards, gross_revenue, current_balance }
-
-**Export to CSV**
-
-    fardrun run --program fard/bin/vendor_export.fard --out ./out -- \
-      --vendor vendor.json --receipts-dir ./receipts --events-dir ./events \
-      --state state.json --out payments.csv
-
-    # columns: run_id, from, to, amount, vendor_reward
+Output includes: current balance, total burned, total rewards paid split by user vs vendor, per-transfer breakdown with run_ids, avg reward per transfer, and projected runway in remaining transfers.
 
 ---
 
 ## fdpay: URI format
-
-Payment requests are encoded as:
 
     fdpay:<base64url(canonical_json(request))>
 
@@ -266,7 +238,7 @@ Where `request` is:
       "to":         "<vendor_pubkey_hex>"
     }
 
-The wallet decodes this, resolves the current nonce from the node, signs the transfer, and submits it. No out-of-band communication required between vendor and wallet beyond the URI.
+The wallet decodes this, resolves the current nonce from the node, signs, and submits. No out-of-band communication required beyond the URI.
 
 ---
 
@@ -275,7 +247,7 @@ The wallet decodes this, resolves the current nonce from the node, signs the tra
     fardrun test --program fard/tests/test_foundation.fard
     fardrun test --program fard/tests/test_engine.fard
 
-14 tests. The engine suite verifies the final replay state hash against the known value `ahd1024:b350cffb...`, byte-for-byte identical to the reference implementation.
+14 tests. The engine suite verifies the final replay state hash against `ahd1024:b350cffb...`, byte-for-byte identical to the reference implementation.
 
 ---
 
@@ -283,7 +255,7 @@ The wallet decodes this, resolves the current nonce from the node, signs the tra
 
 `examples/genesis.json` — zero reward rates, no treasury required.
 
-`examples/genesis_rewards.json` — 200 bps (2%) reward rates with a funded treasury. Use this for the full incentive model.
+`examples/genesis_rewards.json` — 200 bps (2%) reward rates with a funded treasury.
 
 `examples/events.json` — 5 events, 4 canonical after conflict resolution.
 
@@ -292,6 +264,8 @@ The wallet decodes this, resolves the current nonce from the node, signs the tra
 `examples/objects/` — content-addressed merchant registry and oracle set snapshots. File names are AHD-1024-256 hex. The store verifies hash, canonical re-serialization, and schema before use.
 
 `examples/dev-fixtures.json` — deterministic key seeds for local testing.
+
+`examples/network/fard/` — network launcher and smoke test scripts.
 
 ---
 
@@ -308,7 +282,7 @@ Every `fd_apply` run produces:
       "trace_hash":      "ahd1024:..."
     }
 
-`input_hash` is `AHD("FD_EVENT_V1" + canonical_json(event))`. It is the join key between a receipt and its source event — how `wallet_history`, `vendor_inbox`, and all downstream views connect receipts to the events that produced them.
+`input_hash` is `AHD("FD_EVENT_V1" + canonical_json(event))`. It is the join key between a receipt and its source event — how `wallet_history`, `vendor_inbox`, `treasury_analytics`, and all downstream views connect receipts to the events that produced them.
 
 ---
 
@@ -322,7 +296,7 @@ All hashes use AHD-1024-256 with the prefix `ahd1024:`. AHD-1024 is a 1600-bit s
 
 FARD executions are themselves content-addressed. Every run produces a `fard_run_digest` committing to source, imports, inputs, and result. The engine's determinism guarantee and FARD's execution receipt model are the same invariant expressed at two levels.
 
-The engine, wallet, vendor surface, network orchestration, and QR payment flow are all pure FARD. The only Rust is the AHD-1024 hash binary.
+The engine, wallet, vendor surface, network orchestration, QR payment flow, and treasury analytics are all pure FARD. The only Rust is the AHD-1024 hash binary.
 
 ---
 
