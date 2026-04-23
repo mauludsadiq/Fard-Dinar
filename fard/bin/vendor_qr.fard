@@ -1,0 +1,53 @@
+import("../lib/canon") as canon
+import("../lib/args")  as args
+import("std/env")      as env
+import("std/io")       as io
+import("std/json")     as json
+import("std/bytes")    as bytes
+import("std/codec")    as codec
+import("std/list")     as list
+import("std/rec")      as rec
+import("std/str")      as str
+
+fn parse_int(s) {
+  list.fold(str.chars(s), 0, fn(acc, c) {
+    let digits = ["0","1","2","3","4","5","6","7","8","9"] in
+    let idx = list.find_index(digits, x => x == c) in
+    acc * 10 + idx
+  })
+}
+
+fn main() {
+  let argv     = args.get_program_args(env.args()) in
+  let vendor_f = args.require_flag(argv, "--vendor") in
+  let amount_s = args.require_flag(argv, "--amount") in
+  let out_path = args.require_flag(argv, "--out") in
+  let memo     = args.get_flag(argv, "--memo") in
+  if rec.has(vendor_f, "err") then vendor_f
+  else if rec.has(amount_s, "err") then amount_s
+  else if rec.has(out_path, "err") then out_path
+  else
+    let vendor  = json.decode(io.read_file(vendor_f.ok).ok) in
+    let amount  = parse_int(amount_s.ok) in
+    let request = {
+      kind:       "fd_payment_request_v1",
+      to:         vendor.public_key_hex,
+      amount:     amount,
+      memo:       if memo != null then memo else "",
+      nonce_mode: "auto",
+    } in
+    let canonical = canon.canonical(request) in
+    let hex       = bytes.to_hex(bytes.from_string(canonical)) in
+    let b64url    = codec.base64url_encode_hex(hex) in
+    let uri       = str.concat(["fdpay:", b64url]) in
+    let out = {
+      request:  request,
+      uri:      uri,
+      encoding: "base64url",
+      hint:     "scan this URI or pass --file to wallet_pay_request",
+    } in
+    let _ = io.write_file(out_path.ok, json.encode(out)) in
+    out
+}
+
+main()

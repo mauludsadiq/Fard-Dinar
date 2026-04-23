@@ -1,0 +1,110 @@
+import("../lib/engine") as engine
+import("../lib/crypto") as fd_crypto
+import("../lib/args")   as args
+import("std/env")       as env
+import("std/io")        as io
+import("std/json")      as json
+import("std/bytes")     as bytes
+import("std/codec")     as codec
+import("std/list")      as list
+import("std/rec")       as rec
+import("std/str")       as str
+import("std/http")      as http
+
+fn parse_int(s) {
+  list.fold(str.chars(s), 0, fn(acc, c) {
+    let digits = ["0","1","2","3","4","5","6","7","8","9"] in
+    let idx = list.find_index(digits, x => x == c) in
+    acc * 10 + idx
+  })
+}
+
+fn decode_uri(uri) {
+  let prefix = "fdpay:" in
+  if !str.starts_with(uri, prefix)
+  then { err: "not an fdpay URI" }
+  else
+    let b64url  = str.slice(uri, str.len(prefix), str.len(uri)) in
+    let decoded = bytes.to_str(codec.base64url_decode(b64url)) in
+    { ok: json.decode(decoded) }
+}
+
+fn resolve_nonce(node_url, pubkey) {
+  if node_url == null then 0
+  else
+    let r = http.get(str.concat([node_url, "/v1/state"])) in
+    if r.status != 200 then 0
+    else
+      let state   = json.decode(r.body) in
+      let account = rec.get(state.accounts, pubkey) in
+      if account == null then 0
+      else account.next_nonce
+}
+
+fn submit_event(node_url, event) {
+  if node_url == null
+  then { ok: false, note: "no --node-url, event not submitted" }
+  else
+    let ingest_url = str.concat([node_url, "/v1/events"]) in
+    let r = http.post(ingest_url, json.encode(event)) in
+    if r.status == 200
+    then { ok: true, response: json.decode(r.body) }
+    else { ok: false, status: r.status, body: r.body }
+}
+
+fn main() {
+  let argv      = args.get_program_args(env.args()) in
+  let secret_f  = args.require_flag(argv, "--secret") in
+  let out_path  = args.require_flag(argv, "--out") in
+  let file_flag = args.get_flag(argv, "--file") in
+  let uri_flag  = args.get_flag(argv, "--uri") in
+  let node_url  = args.get_flag(argv, "--node-url") in
+  let nonce_s   = args.get_flag(argv, "--nonce") in
+  if rec.has(secret_f, "err") then secret_f
+  else if rec.has(out_path, "err") then out_path
+  else if file_flag == null && uri_flag == null
+  then { err: "must provide --file or --uri" }
+  else
+    let raw_uri =
+      if uri_flag != null then uri_flag
+      else
+        let f = json.decode(io.read_file(file_flag).ok) in
+        f.uri
+    in
+    let decoded = decode_uri(raw_uri) in
+    if rec.has(decoded, "err") then decoded
+    else
+      let request  = decoded.ok in
+      let wallet   = json.decode(io.read_file(secret_f.ok).ok) in
+      let secret   = wallet.secret_key_hex in
+      let from_pub = fd_crypto.public_key(secret) in
+      let nonce    = if nonce_s != null
+                     then parse_int(nonce_s)
+                     else resolve_nonce(node_url, from_pub) in
+      let tx = {
+        kind:      "transfer",
+        from:      from_pub,
+        to:        request.to,
+        amount:    request.amount,
+        nonce:     nonce,
+        signature: "",
+      } in
+      let payload = engine.transfer_signing_payload(tx) in
+      let sig     = fd_crypto.sign_ed25519(secret, payload) in
+      let signed  = { ...tx, signature: sig } in
+      let submit  = submit_event(node_url, signed) in
+      let result  = {
+        ok:        true,
+        to:        request.to,
+        amount:    request.amount,
+        memo:      request.memo,
+        used_nonce: nonce,
+        event_hash: engine.event_hash(signed),
+        submitted: submit,
+        event:     signed,
+      } in
+      let _ = io.write_file(out_path.ok, json.encode(result)) in
+      result
+}
+
+main()
