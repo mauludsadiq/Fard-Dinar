@@ -58,6 +58,16 @@ enum Command {
         #[arg(long)]
         events_dir: PathBuf,
     },
+    Export {
+        #[arg(long)]
+        vendor: PathBuf,
+        #[arg(long)]
+        receipts_dir: PathBuf,
+        #[arg(long)]
+        events_dir: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -217,6 +227,65 @@ fn main() -> Result<()> {
                 "total_vendor_rewards": total_vendor_rewards,
                 "total_user_rewards": total_user_rewards,
                 "average_payment": average_payment
+            }))?);
+        }
+
+
+        Command::Export {
+            vendor,
+            receipts_dir,
+            events_dir,
+            out,
+        } => {
+            let vendor_pubkey = load_public_key(&vendor)?;
+            let mut lines = Vec::new();
+            lines.push("run_id,from,to,amount,user_reward,vendor_reward,is_merchant".to_string());
+
+            for entry in fs::read_dir(&receipts_dir)
+                .with_context(|| format!("failed to read {}", receipts_dir.display()))? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                    continue;
+                }
+
+                let receipt: fd_core::Receipt = serde_json::from_slice(
+                    &fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?
+                ).with_context(|| format!("failed to parse {}", path.display()))?;
+
+                let event_file = events_dir.join(format!("{}.json", receipt.input_hash.replace(":", "_")));
+                if !event_file.exists() {
+                    continue;
+                }
+
+                let event: serde_json::Value = serde_json::from_slice(
+                    &fs::read(&event_file).with_context(|| format!("failed to read {}", event_file.display()))?
+                ).with_context(|| format!("failed to parse {}", event_file.display()))?;
+
+                let to = event.get("to").and_then(|v| v.as_str());
+                if to != Some(vendor_pubkey.as_str()) {
+                    continue;
+                }
+
+                let from = event.get("from").and_then(|v| v.as_str()).unwrap_or("");
+                let amount = event.get("amount").and_then(|v| v.as_u64()).unwrap_or(0);
+                let (user_reward, vendor_reward, is_merchant) = receipt.transfer_effects
+                    .as_ref()
+                    .map(|fx| (fx.user_reward, fx.vendor_reward, fx.is_merchant))
+                    .unwrap_or((0, 0, false));
+
+                lines.push(format!(
+                    "{},{},{},{},{},{},{}",
+                    receipt.run_id, from, vendor_pubkey, amount, user_reward, vendor_reward, is_merchant
+                ));
+            }
+
+            fs::write(&out, lines.join("\n") + "\n")
+                .with_context(|| format!("failed to write {}", out.display()))?;
+            println!("{}", serde_json::to_string_pretty(&json!({
+                "ok": true,
+                "out": out.display().to_string(),
+                "rows": lines.len().saturating_sub(1)
             }))?);
         }
 
