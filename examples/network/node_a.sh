@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 set -e
 
-mkdir -p node_a/{state,receipts,events,objects}
+mkdir -p node_a/{events,receipts,state}
 
 cargo run --bin fardverify -- fd-node \
-  --watch examples \
-  --genesis examples/genesis.json \
+  --watch node_a/events \
+  --genesis examples/genesis_rewards.json \
   --objects examples/objects \
   --state-out node_a/state/state.json \
   --receipts node_a/receipts \
-  --registry examples/dev-fixtures.json \
-  --peer-watch node_b/events \
-  --peer-registry examples/dev-fixtures.json
+  --peer-watch registry_a/events \
+  --peer-registry registry_a/registry.json
