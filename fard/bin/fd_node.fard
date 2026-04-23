@@ -1,0 +1,156 @@
+import("../lib/engine")  as engine
+import("../lib/receipt") as receipt
+import("../lib/hashes")  as hashes
+import("../lib/canon")   as canon
+import("../lib/args")    as args
+import("std/env")        as env
+import("std/io")         as io
+import("std/json")       as json
+import("std/list")       as list
+import("std/rec")        as rec
+import("std/str")        as str
+import("std/net")        as net
+
+fn load_state(state_path, genesis_path) {
+  if io.file_exists(state_path)
+  then json.decode(io.read_file(state_path).ok)
+  else
+    let g = json.decode(io.read_file(genesis_path).ok) in
+    {
+      accounts:               g.accounts,
+      consumed_deposits:      g.consumed_deposits,
+      merchant_registry_hash: g.merchant_registry_hash,
+      oracle_set_hash:        g.oracle_set_hash,
+      reward_config:          g.reward_config,
+    }
+}
+
+fn load_processed(processed_path) {
+  if io.file_exists(processed_path)
+  then json.decode(io.read_file(processed_path).ok)
+  else []
+}
+
+fn load_registry(registry_path) {
+  if registry_path != null && io.file_exists(registry_path)
+  then json.decode(io.read_file(registry_path).ok)
+  else null
+}
+
+fn is_canonical_winner(registry, event) {
+  if registry == null then true
+  else
+    let ck      = engine.conflict_key(event) in
+    let eh      = engine.event_hash(event) in
+    let kind    = event.kind in
+    let map_key = str.concat([kind, ":", ck]) in
+    let entry   = rec.get(registry.entries, map_key) in
+    if entry == null then false
+    else entry.event_hash == eh
+}
+
+fn apply_one(state_path, receipts_dir, processed_path, objects_dir, acc, name, event) {
+  let result = engine.apply_event(objects_dir, acc.state, event) in
+  if rec.has(result, "err")
+  then { state: acc.state, processed: acc.processed, log: list.append(acc.log, str.concat(["rejected: ", name, " - ", result.err])) }
+  else
+    let post_state  = result.ok in
+    let prog_hash   = hashes.hash_str_bytes("fard-engine-v1") in
+    let rcpt        = receipt.build_receipt(prog_hash, event, acc.state, post_state) in
+    let rcpt_hex    = str.slice(rcpt.run_id, str.index_of(rcpt.run_id, ":") + 1, str.len(rcpt.run_id)) in
+    let rcpt_path   = str.concat([receipts_dir, "/", rcpt_hex, ".json"]) in
+    let _           = io.write_file(rcpt_path, json.encode(rcpt)) in
+    let _           = io.write_file(state_path, json.encode(post_state)) in
+    let new_proc    = list.append(acc.processed, name) in
+    let _           = io.write_file(processed_path, json.encode(new_proc)) in
+    { state: post_state, processed: new_proc, log: list.append(acc.log, str.concat(["applied: ", name, " run_id=", rcpt.run_id])) }
+}
+
+fn poll_once(watch_dir, state_path, receipts_dir, processed_path, genesis_path, objects_dir, registry_path) {
+  let state     = load_state(state_path, genesis_path) in
+  let processed = load_processed(processed_path) in
+  let registry  = load_registry(registry_path) in
+  let entries   = io.list_dir(watch_dir) in
+  let jsons     = list.filter(entries, n => str.ends_with(n, ".json")) in
+  let new_names = list.filter(jsons, n => !list.any(processed, x => x == n)) in
+  let new_events = list.flat_map(new_names, fn(name) {
+    let path  = str.concat([watch_dir, "/", name]) in
+    let event = json.decode(io.read_file(path).ok) in
+    if is_canonical_winner(registry, event)
+    then [{ name: name, event: event }]
+    else []
+  }) in
+  let skipped = list.filter(new_names, fn(name) {
+    let path  = str.concat([watch_dir, "/", name]) in
+    let event = json.decode(io.read_file(path).ok) in
+    !is_canonical_winner(registry, event)
+  }) in
+  let skip_log = list.map(skipped, n => str.concat(["skipped (non-canonical): ", n])) in
+  let events_only = list.map(new_events, x => x.event) in
+  let canonical   = engine.canonical_event_set(events_only) in
+  let result = list.fold(canonical, { state: state, processed: processed, log: skip_log }, fn(acc, event) {
+    let eh   = engine.event_hash(event) in
+    let name = str.concat([str.slice(eh, str.index_of(eh, ":") + 1, str.len(eh)), ".json"]) in
+    apply_one(state_path, receipts_dir, processed_path, objects_dir, acc, name, event)
+  }) in
+  result
+}
+
+fn handle(req, watch_dir, state_path, receipts_dir, processed_path, genesis_path, objects_dir, registry_path) {
+  if req.path == "/v1/state" || req.path == "/state"
+  then { status: 200, body: json.encode(load_state(state_path, genesis_path)), headers: {} }
+  else if req.path == "/v1/info" || req.path == "/info"
+  then { status: 200, body: json.encode({ name: "fd-node", ok: true }), headers: {} }
+  else if str.starts_with(req.path, "/v1/receipts/") || str.starts_with(req.path, "/receipts/")
+  then
+    let prefix  = if str.starts_with(req.path, "/v1/") then "/v1/receipts/" else "/receipts/" in
+    let run_hex = str.slice(req.path, str.len(prefix), str.len(req.path)) in
+    let rpath   = str.concat([receipts_dir, "/", run_hex, ".json"]) in
+    if io.file_exists(rpath)
+    then { status: 200, body: io.read_file(rpath).ok, headers: {} }
+    else { status: 404, body: json.encode({ ok: false, error: "not found" }), headers: {} }
+  else if req.path == "/v1/poll" && req.method == "POST"
+  then
+    let result = poll_once(watch_dir, state_path, receipts_dir, processed_path, genesis_path, objects_dir, registry_path) in
+    { status: 200, body: json.encode({ ok: true, log: result.log }), headers: {} }
+  else
+    { status: 404, body: json.encode({ ok: false, error: "not found" }), headers: {} }
+}
+
+fn parse_port(bind, default_port) {
+  let s = if bind != null
+          then str.slice(bind, str.index_of(bind, ":") + 1, str.len(bind))
+          else default_port in
+  list.fold(str.chars(s), 0, fn(acc, c) {
+    let digits = ["0","1","2","3","4","5","6","7","8","9"] in
+    let idx = list.find_index(digits, x => x == c) in
+    acc * 10 + idx
+  })
+}
+
+fn main() {
+  let argv          = args.get_program_args(env.args()) in
+  let watch_dir     = args.require_flag(argv, "--watch") in
+  let genesis_path  = args.require_flag(argv, "--genesis") in
+  let objects_dir   = args.require_flag(argv, "--objects") in
+  let state_out     = args.require_flag(argv, "--state-out") in
+  let receipts_dir  = args.require_flag(argv, "--receipts") in
+  let registry_path = args.get_flag(argv, "--registry") in
+  let bind          = args.get_flag(argv, "--bind") in
+  let port          = parse_port(bind, "7370") in
+  if rec.has(watch_dir, "err") then watch_dir
+  else if rec.has(genesis_path, "err") then genesis_path
+  else if rec.has(objects_dir, "err") then objects_dir
+  else if rec.has(state_out, "err") then state_out
+  else if rec.has(receipts_dir, "err") then receipts_dir
+  else
+    let processed_path = str.concat([state_out.ok, ".processed.json"]) in
+    let _ = io.make_dir(watch_dir.ok) in
+    let _ = io.make_dir(receipts_dir.ok) in
+    let _ = net.serve(port, fn(req) {
+      handle(req, watch_dir.ok, state_out.ok, receipts_dir.ok, processed_path, genesis_path.ok, objects_dir.ok, registry_path)
+    }) in
+    null
+}
+
+main()

@@ -1,0 +1,117 @@
+import("../lib/engine") as engine
+import("../lib/args")   as args
+import("../lib/canon")  as canon
+import("std/env")       as env
+import("std/io")        as io
+import("std/json")      as json
+import("std/list")      as list
+import("std/rec")       as rec
+import("std/str")       as str
+import("std/net")       as net
+import("std/http")      as http
+
+fn str_lt(a, b) { str.lower(a) < str.lower(b) }
+
+fn parse_port(bind, default_port) {
+  let s = if bind != null
+          then str.slice(bind, str.index_of(bind, ":") + 1, str.len(bind))
+          else default_port in
+  list.fold(str.chars(s), 0, fn(acc, c) {
+    let digits = ["0","1","2","3","4","5","6","7","8","9"] in
+    let idx = list.find_index(digits, x => x == c) in
+    acc * 10 + idx
+  })
+}
+
+fn load_registry(path) {
+  if io.file_exists(path)
+  then json.decode(io.read_file(path).ok)
+  else { entries: {} }
+}
+
+fn merge_peer(registry, peer_url) {
+  let r = http.get(str.concat([peer_url, "/v1/registry"])) in
+  if r.status != 200 then registry
+  else
+    let peer         = json.decode(r.body) in
+    let peer_entries = peer.entries in
+    list.fold(rec.keys(peer_entries), registry, fn(acc, k) {
+      let v       = rec.get(peer_entries, k) in
+      let current = rec.get(acc.entries, k) in
+      if current == null
+      then { entries: rec.set(acc.entries, k, v) }
+      else if str_lt(v.event_hash, current.event_hash)
+      then { entries: rec.set(acc.entries, k, v) }
+      else acc
+    })
+}
+
+fn process_event(registry, name, event) {
+  let ck      = engine.conflict_key(event) in
+  let eh      = engine.event_hash(event) in
+  let kind    = event.kind in
+  let map_key = str.concat([kind, ":", ck]) in
+  let current = rec.get(registry.entries, map_key) in
+  if current == null
+  then
+    let entry = { effect_kind: kind, conflict_key: ck, event_hash: eh, event_file: name } in
+    { registry: { entries: rec.set(registry.entries, map_key, entry) }, action: "accepted" }
+  else if str_lt(eh, current.event_hash)
+  then
+    let entry = { effect_kind: kind, conflict_key: ck, event_hash: eh, event_file: name } in
+    { registry: { entries: rec.set(registry.entries, map_key, entry) }, action: "replaced" }
+  else
+    { registry: registry, action: "ignored" }
+}
+
+fn poll_once(watch_dir, registry_path, peer_urls) {
+  let registry = load_registry(registry_path) in
+  let reg1     = list.fold(peer_urls, registry, fn(acc, url) { merge_peer(acc, url) }) in
+  let entries  = io.list_dir(watch_dir) in
+  let jsons    = list.filter(entries, n => str.ends_with(n, ".json")) in
+  let result   = list.fold(jsons, { registry: reg1, log: [] }, fn(acc, name) {
+    let path  = str.concat([watch_dir, "/", name]) in
+    let event = json.decode(io.read_file(path).ok) in
+    let r     = process_event(acc.registry, name, event) in
+    { registry: r.registry, log: list.append(acc.log, str.concat([r.action, ": ", name])) }
+  }) in
+  let _ = io.write_file(registry_path, json.encode(result.registry)) in
+  result.log
+}
+
+fn handle(req, watch_dir, registry_path) {
+  if req.path == "/v1/registry" || req.path == "/registry"
+  then { status: 200, body: json.encode(load_registry(registry_path)), headers: {} }
+  else if req.path == "/v1/info" || req.path == "/info"
+  then { status: 200, body: json.encode({ name: "fd-registry", ok: true }), headers: {} }
+  else if (req.path == "/v1/events" || req.path == "/ingest") && req.method == "POST"
+  then
+    let event = json.decode(req.body) in
+    let eh    = engine.event_hash(event) in
+    let hex   = str.slice(eh, str.index_of(eh, ":") + 1, str.len(eh)) in
+    let fpath = str.concat([watch_dir, "/", hex, ".json"]) in
+    let _     = io.write_file(fpath, canon.canonical(event)) in
+    { status: 200, body: json.encode({ ok: true, event_hash: eh }), headers: {} }
+  else if req.path == "/v1/poll" && req.method == "POST"
+  then
+    let log = poll_once(watch_dir, registry_path, []) in
+    { status: 200, body: json.encode({ ok: true, log: log }), headers: {} }
+  else
+    { status: 404, body: json.encode({ ok: false, error: "not found" }), headers: {} }
+}
+
+fn main() {
+  let argv         = args.get_program_args(env.args()) in
+  let watch_dir    = args.require_flag(argv, "--watch") in
+  let registry_out = args.require_flag(argv, "--registry-out") in
+  let bind         = args.get_flag(argv, "--bind") in
+  let port         = parse_port(bind, "7371") in
+  if rec.has(watch_dir, "err") then watch_dir
+  else if rec.has(registry_out, "err") then registry_out
+  else
+    let _ = io.make_dir(watch_dir.ok) in
+    let _ = net.serve(port, fn(req) { handle(req, watch_dir.ok, registry_out.ok) }) in
+    null
+}
+
+main()

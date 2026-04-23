@@ -191,7 +191,7 @@ fn replay_events(objects_dir, genesis_state, events) {
   })
 }
 
-export {
+export { conflict_key,
   transfer_signing_payload, deposit_signing_payload,
   deposit_id, transfer_conflict_key, event_hash,
   apply_event, apply_deposit, apply_transfer,
