@@ -64,6 +64,14 @@ enum Command {
         #[arg(long)]
         events_dir: PathBuf,
     },
+    Rewards {
+        #[arg(long)]
+        wallet: PathBuf,
+        #[arg(long)]
+        receipts_dir: PathBuf,
+        #[arg(long)]
+        events_dir: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -218,6 +226,81 @@ fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&json!({
                 "public_key_hex": pk,
                 "history": rows
+            }))?);
+        }
+
+        Command::Rewards {
+            wallet,
+            receipts_dir,
+            events_dir,
+        } => {
+            let wallet = load_wallet(&wallet)?;
+            let pk = wallet.public_key_hex();
+            let mut total_rewards = 0_u64;
+            let mut merchant_rewards = 0_u64;
+            let mut p2p_rewards = 0_u64;
+            let mut by_counterparty = serde_json::Map::new();
+
+            for entry in fs::read_dir(&receipts_dir)
+                .with_context(|| format!("failed to read {}", receipts_dir.display()))? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                    continue;
+                }
+
+                let receipt: fd_core::Receipt = match serde_json::from_slice(
+                    &fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?
+                ) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+
+                let event_file = events_dir.join(format!("{}.json", receipt.input_hash.replace(":", "_")));
+                if !event_file.exists() {
+                    continue;
+                }
+
+                let event: serde_json::Value = match serde_json::from_slice(
+                    &fs::read(&event_file).with_context(|| format!("failed to read {}", event_file.display()))?
+                ) {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+
+                let from = event.get("from").and_then(|v| v.as_str()).unwrap_or("");
+                let to = event.get("to").and_then(|v| v.as_str()).unwrap_or("");
+
+                if from != pk {
+                    continue;
+                }
+
+                let counterparty = to;
+                let (user_reward, is_merchant) = receipt.transfer_effects
+                    .as_ref()
+                    .map(|fx| (fx.user_reward, fx.is_merchant))
+                    .unwrap_or((0, false));
+
+                total_rewards += user_reward;
+                if is_merchant {
+                    merchant_rewards += user_reward;
+                } else {
+                    p2p_rewards += user_reward;
+                }
+
+                let current = by_counterparty
+                    .get(counterparty)
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                by_counterparty.insert(counterparty.to_string(), json!(current + user_reward));
+            }
+
+            println!("{}", serde_json::to_string_pretty(&json!({
+                "public_key_hex": pk,
+                "total_rewards": total_rewards,
+                "merchant_rewards": merchant_rewards,
+                "p2p_rewards": p2p_rewards,
+                "by_counterparty": by_counterparty
             }))?);
         }
     }
