@@ -1178,3 +1178,69 @@ Properties:
 - Provides per-counterparty attribution
 - Fully reproducible across nodes
 
+
+
+---
+
+## FD-NETWORK v0.1 (Multi-Node Deployment)
+
+Fard Dinar now supports deterministic multi-node deployment using filesystem and HTTP sync.
+
+### Example Launchers
+
+See:
+
+    examples/network/registry_a.sh
+    examples/network/registry_b.sh
+    examples/network/node_a.sh
+    examples/network/node_b.sh
+    examples/network/http_a.sh
+    examples/network/http_b.sh
+
+### Topologies
+
+Detailed deployment patterns:
+
+    docs/network_topologies.md
+
+Supported configurations:
+
+- Single-node (local dev)
+- Two-registry / one-node (convergence testing)
+- Two-registry / two-node (distributed execution)
+
+### Core Properties
+
+- Deterministic convergence across nodes
+- Transport-agnostic (filesystem + HTTP)
+- Canonical registry merge (min(event_hash))
+- Execution gated by canonical winners
+- No coordination or leader election required
+
+### Health / Monitoring
+
+HTTP endpoints:
+
+    GET /v1/info
+    GET /v1/registry
+    GET /v1/state
+    GET /v1/receipts/<run_id>
+    GET /v1/objects/<hash>
+
+Used for:
+
+- node health checks
+- registry verification
+- state inspection
+- receipt retrieval
+- object integrity validation
+
+### Distributed Flow
+
+    Wallet -> Registry A -> Registry B -> Node(s) -> Receipts/State -> HTTP
+
+This completes the transition from single-instance execution to a fully distributed,
+deterministic payment network.
+
+---
+
