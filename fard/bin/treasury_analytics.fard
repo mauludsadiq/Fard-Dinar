@@ -1,0 +1,95 @@
+import("../lib/engine") as engine
+import("../lib/args")   as args
+import("std/env")       as env
+import("std/io")        as io
+import("std/json")      as json
+import("std/list")      as list
+import("std/rec")       as rec
+import("std/str")       as str
+
+fn load_dir(dir) {
+  let entries = io.list_dir(dir) in
+  list.flat_map(entries, fn(name) {
+    if str.ends_with(name, ".json")
+    then [json.decode(io.read_file(str.concat([dir, "/", name])).ok)]
+    else []
+  })
+}
+
+fn bps_reward(amount, bps) {
+  amount * bps / 10000
+}
+
+fn main() {
+  let argv         = args.get_program_args(env.args()) in
+  let state_path   = args.require_flag(argv, "--state") in
+  let events_dir   = args.require_flag(argv, "--events-dir") in
+  let receipts_dir = args.require_flag(argv, "--receipts-dir") in
+  let genesis_path = args.get_flag(argv, "--genesis") in
+  if rec.has(state_path, "err") then state_path
+  else if rec.has(events_dir, "err") then events_dir
+  else if rec.has(receipts_dir, "err") then receipts_dir
+  else
+    let state           = json.decode(io.read_file(state_path.ok).ok) in
+    let rc              = state.reward_config in
+    let treasury        = rc.treasury_account in
+    let current_balance = rec.getOr(state.accounts, treasury, { balance: 0, next_nonce: 0 }).balance in
+    let genesis_balance = if genesis_path != null
+      then
+        let g = json.decode(io.read_file(genesis_path).ok) in
+        rec.getOr(g.accounts, treasury, { balance: 0, next_nonce: 0 }).balance
+      else current_balance in
+    let receipts  = load_dir(receipts_dir.ok) in
+    let events    = load_dir(events_dir.ok) in
+    let transfers = list.flat_map(receipts, fn(receipt) {
+      let found = list.find(events, fn(ev) {
+        engine.event_hash(ev) == receipt.input_hash
+      }) in
+      if rec.has(found, "none") then []
+      else
+        let event = found.some in
+        if event.kind != "transfer" then []
+        else [{ event: event, run_id: receipt.run_id }]
+    }) in
+    let reward_events = list.map(transfers, fn(item) {
+      let tx       = item.event in
+      let user_bps = rc.user_p2p_bps in
+      let user_r   = bps_reward(tx.amount, user_bps) in
+      let vendor_r = bps_reward(tx.amount, rc.vendor_spend_bps) in
+      {
+        run_id:        item.run_id,
+        from:          tx.from,
+        to:            tx.to,
+        amount:        tx.amount,
+        user_reward:   user_r,
+        vendor_reward: vendor_r,
+        total_reward:  user_r + vendor_r,
+      }
+    }) in
+    let total_paid   = list.fold(reward_events, 0, fn(acc, e) { acc + e.total_reward }) in
+    let total_user   = list.fold(reward_events, 0, fn(acc, e) { acc + e.user_reward }) in
+    let total_vendor = list.fold(reward_events, 0, fn(acc, e) { acc + e.vendor_reward }) in
+    let tx_count     = list.len(transfers) in
+    let avg_per_tx   = if tx_count == 0 then 0 else total_paid / tx_count in
+    let total_supply = list.fold(rec.values(state.accounts), 0, fn(acc, a) { acc + a.balance }) in
+    let burned       = genesis_balance - current_balance in
+    let runway_txs   = if avg_per_tx == 0 then null else current_balance / avg_per_tx in
+    {
+      treasury_account:     treasury,
+      genesis_balance:      genesis_balance,
+      current_balance:      current_balance,
+      total_burned:         burned,
+      total_rewards_paid:   total_paid,
+      total_user_rewards:   total_user,
+      total_vendor_rewards: total_vendor,
+      transfer_count:       tx_count,
+      avg_reward_per_tx:    avg_per_tx,
+      runway_transfers:     runway_txs,
+      total_supply:         total_supply,
+      deposit_count:        list.len(state.consumed_deposits),
+      reward_config:        rc,
+      reward_events:        reward_events,
+    }
+}
+
+main()
