@@ -1148,3 +1148,33 @@ This completes the user-side ledger view.
 
 ---
 
+
+
+### Rewards
+
+View rewards earned by the wallet:
+
+    fd-wallet rewards \
+      --wallet wallet.json \
+      --receipts-dir peer_node_receipts_b \
+      --events-dir peer_node_events_b
+
+Output:
+
+    {
+      "public_key_hex": "<wallet_pubkey>",
+      "total_rewards": 40,
+      "merchant_rewards": 40,
+      "p2p_rewards": 0,
+      "by_counterparty": {
+        "<vendor_pubkey>": 40
+      }
+    }
+
+Properties:
+- Deterministic (derived from canonical receipts + events)
+- Aggregates rewards across all outgoing transactions
+- Splits merchant vs P2P rewards
+- Provides per-counterparty attribution
+- Fully reproducible across nodes
+
