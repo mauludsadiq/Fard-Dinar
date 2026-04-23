@@ -1,27 +1,64 @@
 # Fard Dinar
 
-Fard Dinar is a deterministic monetary engine written in Rust from the frozen `FD-CORE v1.0.0` specification. The repo implements the full event model, canonicalization rules, replay engine, content-addressed registry loading, Ed25519 verification, receipt generation, and a CLI for transition verification and full-ledger replay.
+Fard Dinar is a deterministic monetary engine. Every execution produces an AHD-1024-256 receipt committing to inputs, state transitions, and outputs. Two replays of the same events on the same genesis produce the same final state hash — on any machine, at any time.
 
-## What this repository contains
+## Implementation
 
-- `crates/fd-core` — the core library
-  - canonical JSON encoder with sorted keys and no insignificant whitespace
-  - typed ledger state, events, registries, genesis config, and receipts
-  - Ed25519 signature verification on canonical JSON payloads
-  - content-addressed object store with hash verification and canonical JSON re-hash validation
-  - deterministic conflict resolution on `event_hash`
-  - canonical replay ordering
-  - transfer and deposit transition functions
-  - replay and verification helpers
-- `crates/fd-cli` — the `fardverify` CLI
-- `examples/` — a complete runnable fixture set
-  - genesis
-  - events
-  - individual signed deposits and transfers
-  - content-addressed merchant registry and oracle set objects
-  - deterministic dev fixture keys for reproducible local testing
-- `crates/fd-core/tests` — integration tests covering canonicalization, replay, and transition semantics
-- `scripts/` — packaging helpers
+The engine is implemented in two layers:
+
+| Layer | Language | Purpose |
+|---|---|---|
+| `fard/` | FARD v1.7.0 | Full engine, CLI programs, wallet |
+| AHD-1024 | Rust | Cryptographic hash primitive only |
+
+760 lines of FARD replace 1,547 lines of Rust — a 51% reduction. The only Rust remaining is the AHD-1024 binary, called as a subprocess for hashing.
+
+## Dependencies
+
+- [fardrun](https://github.com/mauludsadiq/FARD) v1.7.0
+- [AHD-1024](https://github.com/mauludsadiq/AHD_1024) compiled binary
+
+Install fardrun:
+
+    curl -sf https://raw.githubusercontent.com/mauludsadiq/FARD/main/install.sh | sh
+
+Build AHD binary:
+
+    git clone https://github.com/mauludsadiq/AHD_1024
+    cd AHD_1024 && cargo build --release
+
+Set the AHD binary path in `fard/lib/hashes.fard`:
+
+    let AHD_BIN = "/path/to/AHD_1024/target/release/ahd_1024"
+
+## Repository layout
+
+    fard/
+    ├── lib/
+    │   ├── hashes.fard    — AHD-1024-256 tagged hashing
+    │   ├── canon.fard     — canonical JSON (sorted keys, no whitespace)
+    │   ├── crypto.fard    — Ed25519 sign and verify
+    │   ├── store.fard     — content-addressed object store
+    │   ├── engine.fard    — deposit, transfer, replay, conflict resolution
+    │   ├── receipt.fard   — transition receipt construction
+    │   └── args.fard      — CLI flag parsing
+    ├── bin/
+    │   ├── fd_replay.fard
+    │   ├── fd_apply.fard
+    │   ├── fd_consistency.fard
+    │   ├── fd_supply.fard
+    │   ├── fd_diff.fard
+    │   ├── wallet_gen.fard
+    │   ├── wallet_sign_transfer.fard
+    │   └── wallet_sign_deposit.fard
+    └── tests/
+        ├── test_foundation.fard   — 7 tests: hashes, canon, crypto
+        └── test_engine.fard       — 7 tests: store, engine, replay
+    examples/
+    ├── genesis.json               — zero-reward genesis
+    ├── genesis_rewards.json       — treasury-backed 200bps rewards
+    ├── events.json                — example event set (5 events, 4 canonical)
+    └── objects/                   — content-addressed registry snapshots
 
 ## Implemented monetary rules
 
@@ -31,17 +68,17 @@ A deposit attestation signed by an authorized oracle mints FD 1:1 against `usd_c
 
 ### Transfer semantics
 
-For a transfer of amount `a`:
+For a transfer of amount `A` with reward config `user_bps` and `vendor_bps`:
 
-- sender balance decreases by `a`
-- sender receives rebate `floor(a / 100)`
-- recipient receives `a`
-- recipient receives additional merchant revenue share `floor(a / 100)` when recipient is in the merchant registry
+- sender balance decreases by `A`
+- sender receives rebate `floor(A * user_bps / 10000)` from treasury
+- recipient receives `A`
+- recipient receives additional `floor(A * vendor_bps / 10000)` from treasury when registered as a merchant
 - sender nonce increments by exactly one
 
 ### Conflict resolution
 
-Conflicts are resolved on canonical `event_hash`, not on execution receipt:
+Conflicts are resolved on canonical `event_hash`:
 
 - transfers conflict on `(from, nonce)`
 - deposits conflict on `deposit_id`
@@ -55,1192 +92,129 @@ Canonical replay order is:
 - deposits sorted by `(beneficiary, external_ref, event_hash)`
 - transfers sorted by `(from, nonce, event_hash)`
 
+### Consumed deposits
+
+Consumed deposit IDs are stored in lexicographic order (equivalent to Rust `BTreeSet`), ensuring deterministic state across implementations.
+
 ### Determinism
 
-The engine uses canonical JSON everywhere consensus depends on bytes:
-
-- event hashes
-- signing payloads
-- registry loading verification
-- receipt input hashing
-- final replay state hashing
-
-## Important implementation note on hashing
-
-The original spec text distinguishes between:
-
-- receipts: AHD-1024-256
-- state commitments: AHD-1024-256
-- derivations: AHD-1024-XOF
-
-This repository implements **AHD-1024-256-tagged hashes end to end**, including state and receipt commitments. The hashing layer is isolated from ledger semantics, canonicalization rules, and the replay model.
-
-
-## Workspace layout
-
-```text
-Fard Dinar/
-├── Cargo.toml
-├── README.md
-├── crates/
-│   ├── fd-core/
-│   │   ├── Cargo.toml
-│   │   ├── src/
-│   │   │   ├── canon.rs
-│   │   │   ├── crypto.rs
-│   │   │   ├── engine.rs
-│   │   │   ├── errors.rs
-│   │   │   ├── hashes.rs
-│   │   │   ├── lib.rs
-│   │   │   ├── receipt.rs
-│   │   │   ├── store.rs
-│   │   │   ├── types.rs
-│   │   │   └── verify.rs
-│   │   └── tests/
-│   │       └── fd_spec.rs
-│   └── fd-cli/
-│       ├── Cargo.toml
-│       └── src/main.rs
-├── examples/
-│   ├── dev-fixtures.json
-│   ├── events.json
-│   ├── genesis.json
-│   ├── deposit_alice.json
-│   ├── deposit_bob.json
-│   ├── transfer_alice_candidate_a.json
-│   ├── transfer_alice_candidate_b.json
-│   ├── transfer_bob.json
-│   └── objects/
-└── scripts/
-```
-
-## Build
-
-Rust is not installed in this container, so this repo was assembled and packaged but not compiled here. In a normal Rust environment:
-
-```bash
-cargo build --workspace
-cargo test --workspace
-```
-
-## CLI
-
-The binary is `fardverify`.
-
-### Verify a single transition
-
-```bash
-cargo run -p fd-cli -- \
-  fd \
-  --event examples/deposit_alice.json \
-  --pre-state examples/genesis.json \
-  --objects examples/objects \
-  --repo .
-```
-
-For `--pre-state`, pass a full `LedgerState` JSON. The genesis file is a `GenesisConfiguration`, so for single-transition verification use a state file built from genesis or run a replay first.
-
-### Replay the full example ledger
-
-```bash
-cargo run -p fd-cli -- \
-  fd-replay \
-  --events examples/events.json \
-  --genesis examples/genesis.json \
-  --objects examples/objects \
-  --repo .
-```
-
-### Apply a single event and materialize state
-
-```bash
-cargo run -p fd-cli -- \
-  fd-apply \
-  --event examples/deposit_alice.json \
-  --pre-state examples/pre_state_genesis.json \
-  --objects examples/objects \
-  --out state.json \
-  --repo .
-```
-
-This command writes the full post-state to `--out` and prints the receipt JSON to stdout.
-
-Optional:
-
-```bash
---receipt-out receipt.json
-```
-
-will persist the receipt for later inspection.
-
-You can inspect a receipt with:
-
-```bash
-cargo run -p fd-cli -- \
-  fd-receipt \
-  --receipt receipt.json
-```
-
-You can chain multiple events by feeding the emitted state file into the next `fd-apply` invocation.
-
-### Show total supply for a materialized state
-
-```bash
-cargo run -p fd-cli -- \
-  fd-supply \
-  --state state.json
-```
-
-This prints the total FD supply in the state and the number of materialized accounts.
-
-### Diff two materialized states
-
-```bash
-cargo run -p fd-cli -- \
-  fd-diff state_1.json state_2.json
-```
-
-This prints account-level changes and total supply delta between two materialized states.
-
-### Check canonical consistency only
-
-```bash
-cargo run -p fd-cli -- \
-  fd-consistency \
-  --events examples/events.json
-```
-
-## Example object store
-
-`examples/objects` is a content-addressed directory. Each file name is the hex portion of a tagged AHD-1024-256 hash. The file bytes themselves are canonical JSON and re-hash to the exact tagged hash referenced by ledger state.
-
-The object store currently contains:
-
-- merchant registry snapshot
-- oracle set snapshot
-
-The store loader enforces all of the following before a transition can use an object:
-
-- object exists
-- bytes hash to the requested tagged hash
-- bytes parse as UTF-8 JSON
-- canonical re-serialization hashes to the same tagged hash
-- schema validates
-- merchant/oracle keys are unique and valid lowercase 64-char Ed25519 public keys
-
-## Default account semantics
-
-Absent accounts are interpreted as:
-
-```json
-{
-  "balance": 0,
-  "next_nonce": 0
-}
-```
-
-Any write materializes the account in `state.accounts`.
-
-## Receipt model
-
-Each accepted transition produces:
-
-- `run_id`
-- `program_hash`
-- `input_hash`
-- `pre_state_hash`
-- `post_state_hash`
-- `trace_hash`
-
-The receipt is generated from canonical JSON over a trace object containing:
-
-- program manifest
-- input event
-- pre-state
-- post-state
+The engine uses canonical JSON everywhere consensus depends on bytes: event hashes, signing payloads, registry loading verification, receipt input hashing, and final replay state hashing. All hashes use AHD-1024-256 with the `ahd1024:` tag prefix.
 
 ## Tests
 
-The integration tests cover:
+    fardrun test --program fard/tests/test_foundation.fard
+    fardrun test --program fard/tests/test_engine.fard
 
-- deposit application
-- merchant revenue share and sender rebate
-- nonce advancement
-- canonical conflict winner selection
-- deterministic replay
-- absent-account materialization
+14 tests total. The engine test suite verifies the final replay state hash against the known value `ahd1024:b350cffb...`.
 
-Run them with:
+## CLI programs
 
-```bash
-cargo test -p fd-core
-```
+### Replay the full example ledger
 
-## Deterministic dev fixtures
+    fardrun run --program fard/bin/fd_replay.fard --out ./out -- \
+      --genesis examples/genesis_rewards.json \
+      --events  examples/events.json \
+      --objects examples/objects
 
-`examples/dev-fixtures.json` contains deterministic private-key seeds and derived public keys for local reproduction of the example signatures. These fixtures are for development only.
+Output: `{ final_state_hash, supply, event_count, ok }`
 
-## Design choices in this codebase
+### Apply a single event
 
-### Why canonical JSON everywhere?
+    fardrun run --program fard/bin/fd_apply.fard --out ./out -- \
+      --event     examples/deposit_bob.json \
+      --pre-state examples/genesis_rewards.json \
+      --objects   examples/objects \
+      --out       state.json
 
-The spec is only meaningful if every node signs, hashes, verifies, and replays the exact same bytes. Canonical JSON supplies that invariant for:
+Writes post-state to `--out` and prints the receipt.
 
-- transfer signing payloads
-- deposit signing payloads
-- event hashes
-- registry snapshots
-- oracle sets
-- receipts
+### Check canonical consistency
 
-### Why conflict resolution on `event_hash`?
+    fardrun run --program fard/bin/fd_consistency.fard --out ./out -- \
+      --events examples/events.json
 
-A receipt hash includes execution details. The economic identity of an event must be independent of who executed it or how they traced it. Therefore canonical selection is based on event content only.
+### Show total supply
 
-### Why an object store instead of network fetch?
-
-Consensus logic must not depend on live network IO. The Rust implementation resolves content-addressed objects from a local store, verifies them, and then uses them. Distribution is a separate concern from monetary validity.
-
-## Extending the repo
-
-The cleanest future extension points are:
-
-
-- persist receipts to a dedicated receipt store
-- add state snapshot export and import commands
-- add registry-entry generation helpers for gossip or CRDT synchronization layers
-- add binary or canonical CBOR codecs while preserving the same field semantics
-
-## Packaging
-
-To create a zip from a local machine:
-
-```bash
-cd ..
-zip -r "Fard Dinar.zip" "Fard Dinar"
-```
-
-A packaged zip is included with this deliverable.
-
-
-## Live Node (execution)
-
-    cargo run -p fd-cli -- \
-      fd-node \
-      --watch ./events \
-      --genesis examples/genesis.json \
-      --objects ./objects \
-      --state-out state.json \
-      --receipts ./receipts
-
-Watches a directory, applies valid events, persists:
-- state
-- receipts
-- processed index
-- rejection logs (_errors/)
-
----
-
-## Registry Node (canonicalization)
-
-    cargo run -p fd-cli -- \
-      fd-registry \
-      --watch ./registry_events \
-      --registry-out registry_state.json
-
-Maintains canonical event selection using:
-- conflict key: (effect_kind, conflict_key)
-- resolution rule: min(event_hash)
-
-Logs:
-- accepted = first insert
-- replaced = better candidate
-- ignored = worse candidate
-
----
-
-## System Model
-
-    Signed Intent -> Registry -> Node -> Receipts
-
-Flow:
-1. Wallet signs intent
-2. Registry selects canonical winner
-3. Node executes deterministically
-4. Receipt commits the transition
-
----
-
-## Runtime Artifacts (ignored)
-
-    node_events/
-    node_receipts/
-    node_state.json
-    node_state.processed.json
-
-    registry_events/
-    registry_state.json
-    registry_state.processed.json
-
-
----
-
-## Peer Sync (Distributed Mode)
-
-### Registry → Registry
-
-Run two registries and connect them:
-
-    cargo run -p fd-cli -- \
-      fd-registry \
-      --watch ./registry_events_b \
-      --registry-out registry_b.json \
-      --peer-registry registry_a.json
-
-Behavior:
-- pulls entries from peer registries
-- merges using min(event_hash)
-- converges deterministically
-
----
-
-### Node → Peer Events + Registry
-
-    cargo run -p fd-cli -- \
-      fd-node \
-      --watch ./node_events \
-      --genesis examples/genesis.json \
-      --objects ./objects \
-      --state-out state.json \
-      --receipts ./receipts \
-      --peer-watch ./peer_events \
-      --peer-registry registry_a.json
-
-Behavior:
-- copies events from peer directories
-- gates execution using canonical registry winners
-- defers events with missing prerequisites (e.g. insufficient balance)
-- retries automatically when dependencies arrive
-
----
-
-### Distributed Flow
-
-    Wallet → Registry A → Registry B → Node B → State + Receipts
-
-Properties:
-- deterministic convergence across nodes
-- no coordination required
-- eventual consistency via registry merge
-- execution strictly gated by canonical winners
-
----
-
-
-
----
-
-## HTTP Transport
-
-FD supports network-based registry sync and state access.
-
-### Start HTTP Server
-
-    cargo run -p fd-cli -- \
-      fd-http \
-      --bind 127.0.0.1:8081 \
-      --registry registry.json \
+    fardrun run --program fard/bin/fd_supply.fard --out ./out -- \
       --state state.json
 
-Endpoints:
+### Diff two states
 
-- GET /registry → returns RegistryState
-- GET /state → returns LedgerState
+    fardrun run --program fard/bin/fd_diff.fard --out ./out -- \
+      --old state_before.json \
+      --new state_after.json
 
-Example:
+### Sign a transfer
 
-    curl http://127.0.0.1:8081/registry
+    fardrun run --program fard/bin/wallet_sign_transfer.fard --out ./out -- \
+      --secret wallet.json \
+      --to     <recipient_pubkey> \
+      --amount 2000 \
+      --nonce  0 \
+      --out    transfer.json
 
----
+### Sign a deposit
 
-### HTTP Registry Sync
+    fardrun run --program fard/bin/wallet_sign_deposit.fard --out ./out -- \
+      --secret       oracle_wallet.json \
+      --beneficiary  <pubkey> \
+      --usd-cents    10000 \
+      --external-ref bank-wire-0001 \
+      --timestamp    1710000000 \
+      --out          deposit.json
 
-Registries should prefer versioned endpoints:
+## Object store
 
-    cargo run -p fd-cli -- \
-      fd-registry \
-      --watch ./registry_events \
-      --registry-out registry_b.json \
-      --peer-registry http://127.0.0.1:8081/v1/registry
+`examples/objects/` is a content-addressed directory. Each file name is the hex portion of a tagged AHD-1024-256 hash. The file bytes are canonical JSON and re-hash to the exact tagged hash referenced by ledger state. The store loader verifies hash, UTF-8, canonical re-serialization, schema, and key uniqueness before any transition can use an object.
 
-Behavior:
-- fetches JSON over HTTP
-- merges with local registry
-- deterministic convergence via min(event_hash)
-
----
-
-### Hybrid Topology
-
-You can mix transports:
-
-    peer-registry:
-      - ./local_registry.json
-      - http://peer1:8081/registry
-      - http://peer2:8081/registry
-
-System remains:
-- deterministic
-- eventually consistent
-- transport-agnostic
-
----
-
-### Architecture
-
-    Filesystem ←→ HTTP ←→ Node/Registry
-
-All transports feed the same canonical logic:
-- conflict_key
-- event_hash ordering
-- deterministic merge
-
----
-
-
-
----
-
-## HTTP Event Ingestion (Direct Routing)
-
-HTTP ingestion can now write directly into a registry or node watch directory.
-
-### Start HTTP with Ingest Target
-
-    cargo run -p fd-cli -- \
-      fd-http \
-      --bind 127.0.0.1:8083 \
-      --registry registry.json \
-      --ingest-dir ./registry_events
-
-### Send Event
-
-    curl -X POST http://127.0.0.1:8083/ingest \
-      -H 'content-type: application/json' \
-      --data-binary @examples/transfer_alice_candidate_a.json
-
-Behavior:
-- validates JSON event
-- computes event_hash
-- writes to target directory as:
-
-    <event_hash>.json
-
-- immediately visible to registry/node
-
----
-
-### Updated Flow
-
-    Client → HTTP (/ingest) → Watch Dir → Registry → Node → State
-
-No intermediate staging directory required.
-
----
-
-### Properties
-
-- transport-independent ingestion
-- deterministic file naming (event_hash)
-- immediate integration with existing pipeline
-- no duplication or race conditions
-
----
-
-
-
----
-
-## HTTP API Surface
-
-Current HTTP endpoints:
-
-- GET /v1/info
-- GET /v1/registry
-- GET /v1/state
-- GET /v1/objects/<hash>
-- GET /v1/receipts/<run_id>
-- POST /v1/events
-
-Legacy compatibility aliases remain available:
-- GET /info
-- GET /registry
-- GET /state
-- GET /objects/<hash>
-- GET /receipts/<run_id>
-- POST /ingest
-
-Example:
-
-    cargo run -p fd-cli -- \
-      fd-http \
-      --bind 127.0.0.1:8084 \
-      --registry peer_registry_a.json \
-      --state peer_node_state_b.json \
-      --ingest-dir peer_registry_events_a \
-      --receipts-dir peer_node_receipts_b \
-      --objects-dir examples/objects
-
-Example queries:
-
-    curl http://127.0.0.1:8084/v1/info
-    curl http://127.0.0.1:8084/v1/registry
-    curl http://127.0.0.1:8084/v1/state
-    curl http://127.0.0.1:8084/v1/objects/ahd1024:72456d65ef7adfa93a7295d48532c8d4b1e604d29371cc4a82ad04e1816232d7
-    curl http://127.0.0.1:8084/v1/receipts/ahd1024:60359a4106309b79c4f82ea5a6cda100665da0e9527aef793787f26992773abe
-    curl -X POST http://127.0.0.1:8084/v1/events \
-      -H 'content-type: application/json' \
-      --data-binary @examples/transfer_alice_candidate_a.json
-
-Behavior:
-- ingest writes directly into the configured watch directory
-- objects and receipts are addressable over HTTP
-- state and registry are readable over HTTP
-- transport is now filesystem + HTTP hybrid
-
-Next moves:
-1. add versioned aliases under /v1/*
-2. keep current routes as compatibility aliases
-3. move node/registry peer sync to prefer /v1 endpoints
-4. then freeze the wire contract in code
-
-
-
----
-
-## HTTP Response Format (Deterministic)
-
-All HTTP endpoints now return canonical JSON responses.
-
-### Success
-
-    {
-      "ok": true
-    }
-
-or (for data endpoints):
-
-    { ...canonical JSON payload... }
-
-### Error
-
-    {
-      "ok": false,
-      "code": "<machine_code>",
-      "error": "<human_message>"
-    }
-
-Examples:
-
-- not found:
-
-    {
-      "ok": false,
-      "code": "not_found",
-      "error": "not found"
-    }
-
-- configuration error:
-
-    {
-      "ok": false,
-      "code": "objects_not_configured",
-      "error": "objects not configured"
-    }
-
-- ingest error:
-
-    {
-      "ok": false,
-      "code": "no_ingest_dir",
-      "error": "no ingest dir configured"
-    }
-
-### Properties
-
-- no plain-text responses
-- stable machine-readable error codes
-- deterministic JSON formatting
-- uniform across all endpoints
-
----
-
-
-
----
-
-## Treasury-Backed Rewards (FD-CORE v1.1.0)
-
-Transfers now use a configurable, treasury-funded reward model.
-
-### RewardConfig
-
-Defined in genesis and carried in state:
-
-    {
-      "user_p2p_bps": 200,
-      "user_spend_bps": 200,
-      "vendor_spend_bps": 200,
-      "treasury_account": "<public_key_hex>"
-    }
-
-- `bps` = basis points (1/100 of a percent)
-- 200 bps = 2%
-
-### Semantics
-
-For a transfer `amount = A`:
-
-- Determine if recipient is a registered merchant.
-- Compute:
-  - `user_reward = floor(A * user_bps / 10_000)`
-  - `vendor_reward = floor(A * vendor_bps / 10_000)` (merchant only)
-- Debit total rewards from `treasury_account`.
-- Apply:
-  - sender: `-A + user_reward`
-  - recipient: `+A (+ vendor_reward if merchant)`
-
-### Guards
-
-- `TreasuryNotFound` if treasury account is missing
-- `InsufficientTreasury` if treasury balance < total rewards
-
-### Properties
-
-- No implicit minting (supply-conserving except via treasury policy)
-- Fully deterministic (included in state and receipts)
-- Tunable via genesis/state without code changes
-
----
-
-
-
----
-
-## Genesis Configurations
+## Genesis configurations
 
 Two reference genesis configurations are provided:
 
-### 1. Zero-Reward (Backward Compatible)
+`examples/genesis.json` — zero reward rates, no treasury required, backward compatible.
 
-    examples/genesis.json
+`examples/genesis_rewards.json` — 200 bps (2%) reward rates, funded treasury account, full incentive model.
 
-- All reward rates set to 0
-- No treasury required
-- Behavior identical to pre-v1.1.0
+## Default account semantics
 
-### 2. Treasury-Backed Rewards
+Absent accounts are interpreted as `{ balance: 0, next_nonce: 0 }`. Any write materializes the account in state.
 
-    examples/genesis_rewards.json
+## Receipt model
 
-- Reward rates set to 200 bps (2%)
-- Includes a funded treasury account:
+Each accepted transition produces a receipt with: `run_id`, `program_hash`, `input_hash`, `pre_state_hash`, `post_state_hash`, `trace_hash`. All fields are AHD-1024-256 tagged hashes over canonical JSON.
 
-    "accounts": {
-      "TREASURY": { "balance": 100000000, "next_nonce": 0 }
-    }
+## Hashing
 
-- Transfers debit rewards from treasury
-- Enables full incentive model
+This repository uses AHD-1024-256 tagged hashes throughout. The tag prefix is `ahd1024:`. The AHD-1024 hash function is a 1600-bit sponge with 24 rounds — see the [AHD-1024 repository](https://github.com/mauludsadiq/AHD_1024) for the full specification, test vectors, and cryptanalytic results.
 
-### Notes
+## Design choices
 
-- `treasury_account` must exist in `accounts`
-- Rewards fail deterministically if treasury is missing or underfunded
-- Both configurations are replay-compatible and deterministic
+### Why canonical JSON everywhere?
 
----
+The spec is only meaningful if every node signs, hashes, verifies, and replays the exact same bytes. Canonical JSON supplies that invariant for transfer signing payloads, deposit signing payloads, event hashes, registry snapshots, oracle sets, and receipts.
 
+### Why conflict resolution on `event_hash`?
 
+A receipt hash includes execution details. The economic identity of an event must be independent of who executed it or how they traced it. Canonical selection is therefore based on event content only.
 
----
+### Why an object store instead of network fetch?
 
-## FD-CLIENT v0.1 (Rust SDK)
+Consensus logic must not depend on live network IO. The engine resolves content-addressed objects from a local store, verifies them, and then uses them. Distribution is a separate concern from monetary validity.
 
-A Rust client is provided for interacting with FD nodes over the canonical `/v1` API.
+### Why FARD?
 
-Location:
+FARD is a deterministic, content-addressed scripting language. Every FARD execution produces a receipt committing to source, imports, inputs, and outputs — the same guarantees Fard Dinar requires from its engine. 760 lines of FARD replace 1,547 lines of Rust with no loss of determinism or verifiability.
 
-    crates/fd-client
+## System model
 
-### Client
+    Signed Intent -> Canonical Event Set -> Engine -> State + Receipts
 
-Provides typed access to the wire protocol:
+1. Wallet signs intent using canonical JSON payload
+2. Conflict resolution selects canonical winner per `(effect_kind, conflict_key)`
+3. Engine executes deterministically against verified object store
+4. Receipt commits the transition with AHD-1024-256 hashes
 
-- `get_info()`
-- `get_registry() -> RegistryState`
-- `get_state() -> LedgerState`
-- `get_receipt(run_id) -> Receipt`
-- `get_object(hash) -> JSON`
-- `submit_event(event)`
+## Packaging
 
-Example:
-
-    let client = Client::new("http://127.0.0.1:8085");
-    let state = client.get_state()?;
-
-### Wallet (Signing Helpers)
-
-The client includes a deterministic wallet layer for constructing and signing events.
-
-Create wallet from secret:
-
-    let wallet = Wallet::from_secret_hex("<32-byte hex>")?;
-
-Get public key:
-
-    let pubkey = wallet.public_key_hex();
-
-Build signed transfer:
-
-    let tx = wallet.build_signed_transfer(
-        "<to_pubkey>",
-        2000,
-        0
-    );
-
-Build signed deposit:
-
-    let dep = wallet.build_signed_deposit(
-        "<beneficiary>",
-        10000,
-        "ref-1",
-        1
-    );
-
-Event wrappers:
-
-    let evt = wallet.build_signed_transfer_event(...);
-
-### Properties
-
-- Uses the same signing payloads as fd-core
-- Produces identical signatures to CLI wallet commands
-- Fully deterministic (no randomness in signing)
-- Canonical JSON compatible with FD-WIRE
-
-### Example
-
-Run the demo:
-
-    cargo run -p fd-client --example client_demo
-
----
-
-
-
-### Convenience Submission
-
-The client provides one-call submission helpers that combine signing + submission:
-
-Submit transfer:
-
-    let res = client.submit_signed_transfer(
-        &wallet,
-        "<to_pubkey>",
-        2000,
-        0
-    )?;
-
-Submit deposit:
-
-    let res = client.submit_signed_deposit(
-        &wallet,
-        "<beneficiary>",
-        10000,
-        "ref-1",
-        1
-    )?;
-
-These methods:
-- build the canonical event
-- sign using the correct payload
-- submit to `/v1/events`
-
-This removes all boilerplate from wallet implementations.
-
-
-
----
-
-## FD-WALLET v0.1 (Reference Wallet CLI)
-
-A minimal, deterministic reference wallet is provided.
-
-Location:
-
-    crates/fd-wallet
-
-### Commands
-
-Initialize wallet:
-
-    fd-wallet init --secret-hex <hex> --out wallet.json
-
-Get address:
-
-    fd-wallet address --wallet wallet.json
-
-Check balance:
-
-    fd-wallet balance --wallet wallet.json --base-url http://127.0.0.1:8085
-
-Send transfer:
-
-    fd-wallet send       --wallet wallet.json       --base-url http://127.0.0.1:8085       --to <recipient_pubkey>       --amount 100       --nonce 1
-
-### Properties
-
-- Uses fd-client for signing + submission
-- Fully deterministic (no randomness)
-- Compatible with FD-WIRE `/v1` API
-- Enforces nonce correctness via node validation
-- Works directly with reward-enabled state
-
-### Notes
-
-- Nonce must match `next_nonce` in state
-- Wallet file is a simple JSON:
-  
-      {
-        "secret_key_hex": "...",
-        "public_key_hex": "..."
-      }
-
-- Secret keys in fixtures are deterministic for testing only
-
----
-
-
-
-### Auto Nonce (Wallet UX)
-
-The wallet supports automatic nonce resolution:
-
-    fd-wallet send \
-      --wallet wallet.json \
-      --base-url http://127.0.0.1:8085 \
-      --to <recipient_pubkey> \
-      --amount 100 \
-      --auto-nonce
-
-Behavior:
-- Fetches `/v1/state`
-- Reads `next_nonce` for the wallet address
-- Uses it for signing
-
-Manual override remains available:
-
-    fd-wallet send ... --nonce 3
-
-### Recommendation
-
-Use `--auto-nonce` for normal operation.
-Use explicit `--nonce` only for debugging or replay scenarios.
-
-
-
----
-
-## FD-VENDOR v0.2 (Payment Request + POS Flow)
-
-The vendor CLI now supports canonical payment requests and end-to-end POS flows.
-
-### Payment Request (Canonical JSON)
-
-Generate a payment request:
-
-    fd-vendor request-payment \
-      --vendor vendor.json \
-      --amount 100 \
-      --memo "coffee" \
-      --out request.json
-
-Output (canonical):
-
-    {
-      "amount": 100,
-      "kind": "fd_payment_request_v1",
-      "memo": "coffee",
-      "nonce_mode": "auto",
-      "to": "<vendor_pubkey>"
-    }
-
-This format is stable and can be encoded as:
-- QR code
-- deep link
-- file transfer
-
-### Wallet Payment (Pay Request)
-
-Wallet can consume the request directly:
-
-    fd-wallet pay-request \
-      --wallet wallet.json \
-      --base-url http://127.0.0.1:8085 \
-      --file request.json \
-      --auto-nonce
-
-Behavior:
-- Parses canonical request JSON
-- Resolves nonce automatically
-- Signs and submits transfer
-- Returns structured result
-
-Example output:
-
-    {
-      "amount": 100,
-      "memo": "coffee",
-      "ok": true,
-      "response": { "ok": true },
-      "to": "<vendor_pubkey>",
-      "used_nonce": 1
-    }
-
-### End-to-End Flow
-
-    fd-vendor request-payment --out request.json
-    fd-wallet pay-request --file request.json --auto-nonce
-    fd-vendor verify-receipt --run-id <id> ...
-
-This is the first complete POS loop.
-
----
-
-
-
----
-
-## FD-VENDOR v0.4 (POS + Merchant Ops)
-
-The vendor CLI now provides a complete merchant operations surface.
-
-### Commands
-
-Request payment:
-
-    fd-vendor request-payment --amount 100 --memo coffee --out request.json
-
-Verify receipt:
-
-    fd-vendor verify-receipt --run-id <id> --amount 100 ...
-
-Inbox (ledger view):
-
-    fd-vendor inbox       --vendor vendor.json       --receipts-dir peer_node_receipts_b       --events-dir peer_node_events_b
-
-Summary (P&L):
-
-    fd-vendor summary       --vendor vendor.json       --receipts-dir peer_node_receipts_b       --events-dir peer_node_events_b
-
-POS (live terminal):
-
-    fd-vendor pos       --vendor vendor.json       --receipts-dir peer_node_receipts_b       --events-dir peer_node_events_b
-
-Example POS output:
-
-    [PAYMENT] amount=2000 from=8a88e3dd... user_reward=40 vendor_reward=40 run_id=ahd1024:...
-
-### Properties
-
-- Fully deterministic (filesystem + canonical receipts)
-- No database required
-- No server-side state
-- Works offline against synced receipt/event stores
-- Vendor rewards visible immediately
-
-### End-to-End Merchant Flow
-
-    fd-vendor request-payment --out request.json
-    fd-wallet pay-request --file request.json --auto-nonce
-    fd-vendor pos
-    fd-vendor inbox
-    fd-vendor summary
-
-This is the first complete merchant payment + accounting loop.
-
----
-
-
-
-### Export (Accounting / Reconciliation)
-
-Export vendor payments to CSV:
-
-    fd-vendor export \
-      --vendor vendor.json \
-      --receipts-dir peer_node_receipts_b \
-      --events-dir peer_node_events_b \
-      --out payments.csv
-
-Output format:
-
-    run_id,from,to,amount,user_reward,vendor_reward,is_merchant
-
-Example:
-
-    ahd1024:...,8a88e3dd...,ed4928c6...,2000,40,40,true
-
-Properties:
-- Deterministic (derived from canonical receipts + events)
-- No database required
-- Suitable for accounting, analytics, and audit
-- Reproducible across nodes
-
-
-
----
-
-## FD-WALLET v0.3 (User History)
-
-The wallet now provides a deterministic user-side transaction history.
-
-### History
-
-View all transactions involving the wallet:
-
-    fd-wallet history \
-      --wallet wallet.json \
-      --receipts-dir peer_node_receipts_b \
-      --events-dir peer_node_events_b
-
-Output:
-
-    {
-      "public_key_hex": "<wallet_pubkey>",
-      "history": [
-        {
-          "run_id": "...",
-          "direction": "out" | "in",
-          "counterparty": "<pubkey>",
-          "amount": 100,
-          "user_reward": 2,
-          "vendor_reward": 2,
-          "is_merchant": true
-        }
-      ]
-    }
-
-Properties:
-- Deterministic (derived from canonical receipts + events)
-- No database required
-- Shows both incoming and outgoing flows
-- Includes reward attribution
-- Fully reproducible across nodes
-
-### End-to-End User Flow
-
-    fd-wallet pay-request --file request.json --auto-nonce
-    fd-wallet history
-
-This completes the user-side ledger view.
-
----
-
-
-
-### Rewards
-
-View rewards earned by the wallet:
-
-    fd-wallet rewards \
-      --wallet wallet.json \
-      --receipts-dir peer_node_receipts_b \
-      --events-dir peer_node_events_b
-
-Output:
-
-    {
-      "public_key_hex": "<wallet_pubkey>",
-      "total_rewards": 40,
-      "merchant_rewards": 40,
-      "p2p_rewards": 0,
-      "by_counterparty": {
-        "<vendor_pubkey>": 40
-      }
-    }
-
-Properties:
-- Deterministic (derived from canonical receipts + events)
-- Aggregates rewards across all outgoing transactions
-- Splits merchant vs P2P rewards
-- Provides per-counterparty attribution
-- Fully reproducible across nodes
-
-
-
----
-
-## FD-NETWORK v0.1 (Multi-Node Deployment)
-
-Fard Dinar now supports deterministic multi-node deployment using filesystem and HTTP sync.
-
-### Example Launchers
-
-See:
-
-    examples/network/registry_a.sh
-    examples/network/registry_b.sh
-    examples/network/node_a.sh
-    examples/network/node_b.sh
-    examples/network/http_a.sh
-    examples/network/http_b.sh
-
-### Topologies
-
-Detailed deployment patterns:
-
-    docs/network_topologies.md
-
-Supported configurations:
-
-- Single-node (local dev)
-- Two-registry / one-node (convergence testing)
-- Two-registry / two-node (distributed execution)
-
-### Core Properties
-
-- Deterministic convergence across nodes
-- Transport-agnostic (filesystem + HTTP)
-- Canonical registry merge (min(event_hash))
-- Execution gated by canonical winners
-- No coordination or leader election required
-
-### Health / Monitoring
-
-HTTP endpoints:
-
-    GET /v1/info
-    GET /v1/registry
-    GET /v1/state
-    GET /v1/receipts/<run_id>
-    GET /v1/objects/<hash>
-
-Used for:
-
-- node health checks
-- registry verification
-- state inspection
-- receipt retrieval
-- object integrity validation
-
-### Distributed Flow
-
-    Wallet -> Registry A -> Registry B -> Node(s) -> Receipts/State -> HTTP
-
-This completes the transition from single-instance execution to a fully distributed,
-deterministic payment network.
-
----
-
+    cd ..
+    zip -r "Fard Dinar.zip" "Fard Dinar"
