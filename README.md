@@ -1072,3 +1072,29 @@ This is the first complete merchant payment + accounting loop.
 
 ---
 
+
+
+### Export (Accounting / Reconciliation)
+
+Export vendor payments to CSV:
+
+    fd-vendor export \
+      --vendor vendor.json \
+      --receipts-dir peer_node_receipts_b \
+      --events-dir peer_node_events_b \
+      --out payments.csv
+
+Output format:
+
+    run_id,from,to,amount,user_reward,vendor_reward,is_merchant
+
+Example:
+
+    ahd1024:...,8a88e3dd...,ed4928c6...,2000,40,40,true
+
+Properties:
+- Deterministic (derived from canonical receipts + events)
+- No database required
+- Suitable for accounting, analytics, and audit
+- Reproducible across nodes
+
