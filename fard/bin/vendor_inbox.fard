@@ -1,0 +1,52 @@
+import("../lib/engine") as engine
+import("../lib/args")   as args
+import("std/env")       as env
+import("std/io")        as io
+import("std/json")      as json
+import("std/list")      as list
+import("std/rec")       as rec
+import("std/str")       as str
+
+fn load_dir(dir) {
+  let entries = io.list_dir(dir) in
+  list.flat_map(entries, fn(name) {
+    if str.ends_with(name, ".json")
+    then [json.decode(io.read_file(str.concat([dir, "/", name])).ok)]
+    else []
+  })
+}
+
+fn main() {
+  let argv         = args.get_program_args(env.args()) in
+  let vendor_f     = args.require_flag(argv, "--vendor") in
+  let receipts_dir = args.require_flag(argv, "--receipts-dir") in
+  let events_dir   = args.require_flag(argv, "--events-dir") in
+  if rec.has(vendor_f, "err") then vendor_f
+  else if rec.has(receipts_dir, "err") then receipts_dir
+  else if rec.has(events_dir, "err") then events_dir
+  else
+    let vendor   = json.decode(io.read_file(vendor_f.ok).ok) in
+    let pubkey   = vendor.public_key_hex in
+    let receipts = load_dir(receipts_dir.ok) in
+    let events   = load_dir(events_dir.ok) in
+    let payments = list.flat_map(receipts, fn(receipt) {
+      let found = list.find(events, fn(ev) {
+        engine.event_hash(ev) == receipt.input_hash
+      }) in
+      if rec.has(found, "none") then []
+      else
+        let event = found.some in
+        if event.kind == "transfer" && event.to == pubkey
+        then [{
+          run_id: receipt.run_id,
+          from:   event.from,
+          amount: event.amount,
+          nonce:  event.nonce,
+        }]
+        else []
+    }) in
+    let total = list.fold(payments, 0, fn(acc, p) { acc + p.amount }) in
+    { public_key_hex: pubkey, payment_count: list.len(payments), total_received: total, payments: payments }
+}
+
+main()

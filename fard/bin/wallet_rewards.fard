@@ -1,0 +1,56 @@
+import("../lib/engine") as engine
+import("../lib/args")   as args
+import("std/env")       as env
+import("std/io")        as io
+import("std/json")      as json
+import("std/list")      as list
+import("std/rec")       as rec
+import("std/str")       as str
+
+fn load_dir(dir) {
+  let entries = io.list_dir(dir) in
+  list.flat_map(entries, fn(name) {
+    if str.ends_with(name, ".json")
+    then [json.decode(io.read_file(str.concat([dir, "/", name])).ok)]
+    else []
+  })
+}
+
+fn main() {
+  let argv         = args.get_program_args(env.args()) in
+  let wallet_path  = args.require_flag(argv, "--wallet") in
+  let receipts_dir = args.require_flag(argv, "--receipts-dir") in
+  let events_dir   = args.require_flag(argv, "--events-dir") in
+  let state_path   = args.require_flag(argv, "--state") in
+  if rec.has(wallet_path, "err") then wallet_path
+  else if rec.has(receipts_dir, "err") then receipts_dir
+  else if rec.has(events_dir, "err") then events_dir
+  else if rec.has(state_path, "err") then state_path
+  else
+    let wallet   = json.decode(io.read_file(wallet_path.ok).ok) in
+    let pubkey   = wallet.public_key_hex in
+    let receipts = load_dir(receipts_dir.ok) in
+    let events   = load_dir(events_dir.ok) in
+    let state    = json.decode(io.read_file(state_path.ok).ok) in
+    let rc       = state.reward_config in
+    let transfers_out = list.flat_map(receipts, fn(receipt) {
+      let found = list.find(events, fn(ev) {
+        engine.event_hash(ev) == receipt.input_hash
+      }) in
+      if rec.has(found, "none") then []
+      else
+        let event = found.some in
+        if event.kind == "transfer" && event.from == pubkey
+        then [event]
+        else []
+    }) in
+    let by_counterparty = list.fold(transfers_out, {}, fn(acc, tx) {
+      let prev   = rec.getOr(acc, tx.to, 0) in
+      let reward = tx.amount * rc.user_p2p_bps / 10000 in
+      rec.set(acc, tx.to, prev + reward)
+    }) in
+    let total = list.fold(rec.values(by_counterparty), 0, fn(a, b) { a + b }) in
+    { public_key_hex: pubkey, total_rewards: total, by_counterparty: by_counterparty }
+}
+
+main()

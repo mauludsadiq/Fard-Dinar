@@ -1,0 +1,63 @@
+import("../lib/engine") as engine
+import("../lib/args")   as args
+import("std/env")       as env
+import("std/io")        as io
+import("std/json")      as json
+import("std/list")      as list
+import("std/rec")       as rec
+import("std/str")       as str
+
+fn load_dir(dir) {
+  let entries = io.list_dir(dir) in
+  list.flat_map(entries, fn(name) {
+    if str.ends_with(name, ".json")
+    then [json.decode(io.read_file(str.concat([dir, "/", name])).ok)]
+    else []
+  })
+}
+
+fn main() {
+  let argv         = args.get_program_args(env.args()) in
+  let vendor_f     = args.require_flag(argv, "--vendor") in
+  let receipts_dir = args.require_flag(argv, "--receipts-dir") in
+  let events_dir   = args.require_flag(argv, "--events-dir") in
+  let state_path   = args.require_flag(argv, "--state") in
+  let out_path     = args.require_flag(argv, "--out") in
+  if rec.has(vendor_f, "err") then vendor_f
+  else if rec.has(receipts_dir, "err") then receipts_dir
+  else if rec.has(events_dir, "err") then events_dir
+  else if rec.has(state_path, "err") then state_path
+  else if rec.has(out_path, "err") then out_path
+  else
+    let vendor   = json.decode(io.read_file(vendor_f.ok).ok) in
+    let pubkey   = vendor.public_key_hex in
+    let receipts = load_dir(receipts_dir.ok) in
+    let events   = load_dir(events_dir.ok) in
+    let state    = json.decode(io.read_file(state_path.ok).ok) in
+    let rc       = state.reward_config in
+    let rows     = list.flat_map(receipts, fn(receipt) {
+      let found = list.find(events, fn(ev) {
+        engine.event_hash(ev) == receipt.input_hash
+      }) in
+      if rec.has(found, "none") then []
+      else
+        let event = found.some in
+        if event.kind == "transfer" && event.to == pubkey
+        then
+          let vendor_reward = event.amount * rc.vendor_spend_bps / 10000 in
+          [str.concat([
+            receipt.run_id, ",",
+            event.from, ",",
+            pubkey, ",",
+            str.from(event.amount), ",",
+            str.from(vendor_reward),
+          ])]
+        else []
+    }) in
+    let header = "run_id,from,to,amount,vendor_reward" in
+    let csv    = str.join(list.concat([[header], rows]), "\n") in
+    let _ = io.write_file(out_path.ok, csv) in
+    { rows_exported: list.len(rows), out: out_path.ok }
+}
+
+main()

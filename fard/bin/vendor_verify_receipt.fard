@@ -1,0 +1,33 @@
+import("../lib/args") as args
+import("std/env")     as env
+import("std/io")      as io
+import("std/json")    as json
+import("std/list")    as list
+import("std/rec")     as rec
+import("std/str")     as str
+
+fn load_dir(dir) {
+  let entries = io.list_dir(dir) in
+  list.flat_map(entries, fn(name) {
+    if str.ends_with(name, ".json")
+    then [json.decode(io.read_file(str.concat([dir, "/", name])).ok)]
+    else []
+  })
+}
+
+fn main() {
+  let argv         = args.get_program_args(env.args()) in
+  let run_id_flag  = args.require_flag(argv, "--run-id") in
+  let receipts_dir = args.require_flag(argv, "--receipts-dir") in
+  if rec.has(run_id_flag, "err") then run_id_flag
+  else if rec.has(receipts_dir, "err") then receipts_dir
+  else
+    let run_id   = run_id_flag.ok in
+    let receipts = load_dir(receipts_dir.ok) in
+    let found    = list.find(receipts, fn(r) { r.run_id == run_id }) in
+    if rec.has(found, "none")
+    then { ok: false, run_id: run_id, err: "receipt not found" }
+    else { ok: true, run_id: run_id, receipt: found.some }
+}
+
+main()
