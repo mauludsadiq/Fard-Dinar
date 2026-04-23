@@ -292,7 +292,7 @@ The mesh convergence test independently verifies the same hash across two nodes 
 
 `docs/FD_CORE_SPEC_v1.0.0.md` — monetary rules, event schema, conflict resolution, receipt model.
 
-`docs/FD_NETWORK_SPEC_v1.0.md` — component responsibilities, peer sync protocol, network invariants, failure modes, health model, convergence proof.
+`docs/FD_NETWORK_SPEC_v1.0.0.md` — component responsibilities, peer sync protocol, network invariants, failure modes, health model, convergence proof.
 
 ---
 
