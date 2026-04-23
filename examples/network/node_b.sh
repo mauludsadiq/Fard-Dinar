@@ -10,4 +10,5 @@ cargo run --bin fardverify -- fd-node \
   --state-out node_b/state.json \
   --receipts node_b/receipts \
   --peer-watch registry_b/events \
+  --peer-watch registry_a/events \
   --peer-registry registry_b/registry.json
