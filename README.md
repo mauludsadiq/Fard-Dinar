@@ -65,7 +65,7 @@ The only Rust is the AHD-1024 binary. Everything else is FARD.
 
     bash examples/network/fard/smoke_test.sh
 
-Starts a registry and node, deposits to alice, generates a QR payment request, wallet pays it with auto-nonce, polls to apply, verifies the receipt. Full end-to-end in one command.
+Starts a registry and node, deposits to alice, generates a QR payment request, wallet pays with auto-nonce, polls to apply, verifies the receipt. Full end-to-end in one command.
 
 ---
 
@@ -138,11 +138,33 @@ Writes post-state to `--out`, prints the receipt. Add `--receipt-out receipt.jso
     GET  /v1/receipts/<hex>  — receipt by run_id hex
     GET  /v1/info
 
+**Health**
+
+    fardrun run --program fard/bin/fd_health.fard --out ./out -- \
+      --node     http://127.0.0.1:7370 \
+      --registry http://127.0.0.1:7371
+
+    # also: --nodes <csv>, --registries <csv>
+    # { ok, converged, state_hash, nodes: [...], registries: [...] }
+
+**Network status**
+
+    fardrun run --program fard/bin/fd_net_status.fard --out ./out -- \
+      --topology examples/network/fard/topology_single.json
+
+    # { ok, fully_converged, nodes_converged, registries_converged,
+    #   state_hash, registry_hash, nodes: [...], registries: [...] }
+
 **Launchers**
 
-    bash examples/network/fard/single_node.sh     # registry :7371 + node :7370
-    bash examples/network/fard/two_registry.sh    # registry A :7371, B :7373, node B :7372
-    bash examples/network/fard/smoke_test.sh      # full end-to-end test
+    bash examples/network/fard/single_node.sh       # registry :7371 + node :7370
+    bash examples/network/fard/two_registry.sh      # registry A :7371, B :7373, node B :7372
+    bash examples/network/fard/smoke_test.sh        # full end-to-end test
+
+**Topology files**
+
+    examples/network/fard/topology_single.json        # single registry + node
+    examples/network/fard/topology_two_registry.json  # two registries + one node
 
 ---
 
@@ -177,8 +199,12 @@ Decodes the `fdpay:` URI, resolves nonce from the node automatically, signs and 
     fardrun run --program fard/bin/wallet_history.fard --out ./out -- \
       --wallet wallet_pub.json --receipts-dir ./receipts --events-dir ./events
 
+    # { public_key_hex, count, history: [{ run_id, kind, direction, counterparty, amount }] }
+
     fardrun run --program fard/bin/wallet_rewards.fard --out ./out -- \
       --wallet wallet_pub.json --receipts-dir ./receipts --events-dir ./events --state state.json
+
+    # { public_key_hex, total_rewards, by_counterparty }
 
 ---
 
@@ -220,7 +246,7 @@ Produces a `fdpay:` URI — base64url of the canonical request JSON. Display as 
       --events-dir   ./events \
       --receipts-dir ./receipts
 
-Output includes: current balance, total burned, total rewards paid split by user vs vendor, per-transfer breakdown with run_ids, avg reward per transfer, and projected runway in remaining transfers.
+Output: current balance, total burned, rewards paid split by user vs vendor, per-transfer breakdown with run_ids, avg reward per transfer, projected runway in remaining transfers.
 
 ---
 
@@ -265,7 +291,7 @@ The wallet decodes this, resolves the current nonce from the node, signs, and su
 
 `examples/dev-fixtures.json` — deterministic key seeds for local testing.
 
-`examples/network/fard/` — network launcher and smoke test scripts.
+`examples/network/fard/` — launchers, smoke test, and topology specs.
 
 ---
 
@@ -296,7 +322,7 @@ All hashes use AHD-1024-256 with the prefix `ahd1024:`. AHD-1024 is a 1600-bit s
 
 FARD executions are themselves content-addressed. Every run produces a `fard_run_digest` committing to source, imports, inputs, and result. The engine's determinism guarantee and FARD's execution receipt model are the same invariant expressed at two levels.
 
-The engine, wallet, vendor surface, network orchestration, QR payment flow, and treasury analytics are all pure FARD. The only Rust is the AHD-1024 hash binary.
+The engine, wallet, vendor surface, network orchestration, QR payment flow, observability, and treasury analytics are all pure FARD. The only Rust is the AHD-1024 hash binary.
 
 ---
 
