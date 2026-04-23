@@ -1,0 +1,40 @@
+import("../lib/engine")  as engine
+import("../lib/receipt") as receipt
+import("../lib/hashes")  as hashes
+import("../lib/canon")   as canon
+import("../lib/args")    as args
+import("std/env")        as env
+import("std/io")         as io
+import("std/json")       as json
+import("std/rec")        as rec
+
+fn main() {
+  let argv        = args.get_program_args(env.args()) in
+  let event_path  = args.require_flag(argv, "--event") in
+  let state_path  = args.require_flag(argv, "--pre-state") in
+  let objects_dir = args.require_flag(argv, "--objects") in
+  let out_path    = args.require_flag(argv, "--out") in
+  if rec.has(event_path, "err") then event_path
+  else if rec.has(state_path, "err") then state_path
+  else if rec.has(objects_dir, "err") then objects_dir
+  else if rec.has(out_path, "err") then out_path
+  else
+    let event     = json.decode(io.read_file(event_path.ok).ok) in
+    let pre_state = json.decode(io.read_file(state_path.ok).ok) in
+    let result    = engine.apply_event(objects_dir.ok, pre_state, event) in
+    if rec.has(result, "err")
+    then { ok: false, err: result.err }
+    else
+      let post_state    = result.ok in
+      let program_hash  = hashes.hash_str_bytes("fard-engine-v1") in
+      let rcpt          = receipt.build_receipt(program_hash, event, pre_state, post_state) in
+      let state_json    = json.encode(post_state) in
+      let _ = io.write_file(out_path.ok, state_json) in
+      let receipt_out = args.get_flag(argv, "--receipt-out") in
+      let _ = if receipt_out != null
+              then io.write_file(receipt_out, json.encode(rcpt))
+              else null in
+      rcpt
+}
+
+main()

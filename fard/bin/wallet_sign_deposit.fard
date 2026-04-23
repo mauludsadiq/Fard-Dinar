@@ -1,0 +1,55 @@
+import("../lib/engine") as engine
+import("../lib/crypto") as fd_crypto
+import("../lib/args")   as args
+import("std/env")       as env
+import("std/io")        as io
+import("std/json")      as json
+import("std/list")      as list
+import("std/rec")       as rec
+import("std/str")       as str
+
+fn parse_int(s) {
+  list.fold(str.chars(s), 0, fn(acc, c) {
+    let digits = ["0","1","2","3","4","5","6","7","8","9"] in
+    let idx = list.find_index(digits, x => x == c) in
+    acc * 10 + idx
+  })
+}
+
+fn main() {
+  let argv         = args.get_program_args(env.args()) in
+  let secret_f     = args.require_flag(argv, "--secret") in
+  let beneficiary  = args.require_flag(argv, "--beneficiary") in
+  let usd_cents_s  = args.require_flag(argv, "--usd-cents") in
+  let external_ref = args.require_flag(argv, "--external-ref") in
+  let timestamp_s  = args.require_flag(argv, "--timestamp") in
+  let out_path     = args.require_flag(argv, "--out") in
+  if rec.has(secret_f, "err") then secret_f
+  else if rec.has(beneficiary, "err") then beneficiary
+  else if rec.has(usd_cents_s, "err") then usd_cents_s
+  else if rec.has(external_ref, "err") then external_ref
+  else if rec.has(timestamp_s, "err") then timestamp_s
+  else if rec.has(out_path, "err") then out_path
+  else
+    let wallet    = json.decode(io.read_file(secret_f.ok).ok) in
+    let secret    = wallet.secret_key_hex in
+    let oracle_id = fd_crypto.public_key(secret) in
+    let usd_cents = parse_int(usd_cents_s.ok) in
+    let timestamp = parse_int(timestamp_s.ok) in
+    let dep = {
+      kind:         "deposit",
+      oracle_id:    oracle_id,
+      usd_cents:    usd_cents,
+      beneficiary:  beneficiary.ok,
+      external_ref: external_ref.ok,
+      timestamp:    timestamp,
+      signature:    "",
+    } in
+    let payload = engine.deposit_signing_payload(dep) in
+    let sig     = fd_crypto.sign_ed25519(secret, payload) in
+    let signed  = { ...dep, signature: sig } in
+    let _ = io.write_file(out_path.ok, json.encode(signed)) in
+    signed
+}
+
+main()

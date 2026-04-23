@@ -1,0 +1,41 @@
+import("../lib/engine") as engine
+import("../lib/hashes") as hashes
+import("../lib/canon")  as canon
+import("../lib/args")   as args
+import("std/env")       as env
+import("std/io")        as io
+import("std/json")      as json
+import("std/list")      as list
+import("std/rec")       as rec
+
+fn main() {
+  let argv    = args.get_program_args(env.args()) in
+  let genesis_path = args.require_flag(argv, "--genesis") in
+  let events_path  = args.require_flag(argv, "--events") in
+  let objects_dir  = args.require_flag(argv, "--objects") in
+  if rec.has(genesis_path, "err") then genesis_path
+  else if rec.has(events_path, "err") then events_path
+  else if rec.has(objects_dir, "err") then objects_dir
+  else
+    let g   = json.decode(io.read_file(genesis_path.ok).ok) in
+    let genesis_state = {
+      accounts:               g.accounts,
+      consumed_deposits:      g.consumed_deposits,
+      merchant_registry_hash: g.merchant_registry_hash,
+      oracle_set_hash:        g.oracle_set_hash,
+      reward_config:          g.reward_config,
+    } in
+    let events = json.decode(io.read_file(events_path.ok).ok) in
+    let result = engine.replay_events(objects_dir.ok, genesis_state, events) in
+    if rec.has(result, "err")
+    then { ok: false, err: result.err }
+    else
+      let final_hash = hashes.hash_str_bytes(canon.canonical(result.ok)) in
+      let supply = list.fold(
+        list.map(rec.values(result.ok.accounts), a => a.balance),
+        0, fn(acc, b) { acc + b }
+      ) in
+      { final_state_hash: final_hash, supply: supply, event_count: list.len(result.receipts), ok: true }
+}
+
+main()

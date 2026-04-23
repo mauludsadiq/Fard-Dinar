@@ -1,0 +1,37 @@
+import("../lib/hashes") as hashes
+import("../lib/canon")  as canon
+import("../lib/crypto") as crypto
+import("std/bytes")     as bytes
+import("std/str")       as str
+
+test "hash_text produces ahd1024 tag" {
+  str.starts_with(hashes.hash_text("abc"), "ahd1024:")
+}
+
+test "hash_text correct length" {
+  str.len(hashes.hash_text("abc")) == 72
+}
+
+test "hash_str_bytes of empty matches known vector" {
+  hashes.hash_str_bytes("") == "ahd1024:e8bf66fb70ec3787817c0cb717952140569a853f94dee36a21268632b9a59ed0"
+}
+
+test "canonical sorts keys" {
+  canon.canonical({ z: 1, a: 2 }) == "{\"a\":2,\"z\":1}"
+}
+
+test "canonical nested" {
+  canon.canonical({ b: { y: 1, x: 2 }, a: 3 }) == "{\"a\":3,\"b\":{\"x\":2,\"y\":1}}"
+}
+
+test "valid_pubkey length check" {
+  crypto.valid_pubkey("8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c")
+  && !crypto.valid_pubkey("short")
+}
+
+test "ed25519_verify rejects bad sig" {
+  let pk  = "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c"
+  let msg = bytes.from_string("hello")
+  let sig = str.repeat("00", 64)
+  !crypto.verify_ed25519(pk, msg, sig)
+}

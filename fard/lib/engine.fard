@@ -1,0 +1,199 @@
+import("std/json")  as json
+import("std/list")  as list
+import("std/str")   as str
+import("std/bytes") as bytes
+import("std/rec")   as rec
+import("./hashes")  as hashes
+import("./canon")   as canon
+import("./crypto")  as crypto
+import("./store")   as store
+
+fn transfer_signing_payload(tx) {
+  bytes.from_string(canon.canonical({
+    domain: "FD_TRANSFER_V1",
+    from:   tx.from,
+    to:     tx.to,
+    amount: tx.amount,
+    nonce:  tx.nonce,
+  }))
+}
+
+fn deposit_signing_payload(dep) {
+  bytes.from_string(canon.canonical({
+    domain:       "FD_DEPOSIT_V1",
+    oracle_id:    dep.oracle_id,
+    usd_cents:    dep.usd_cents,
+    beneficiary:  dep.beneficiary,
+    external_ref: dep.external_ref,
+    timestamp:    dep.timestamp,
+  }))
+}
+
+fn deposit_id(dep) {
+  hashes.hash_str_bytes(canon.canonical({
+    domain:       "FD_DEP_V1",
+    oracle_id:    dep.oracle_id,
+    external_ref: dep.external_ref,
+  }))
+}
+
+fn transfer_conflict_key(tx) {
+  hashes.hash_str_bytes(canon.canonical({
+    domain: "FD_CONFLICT_V1",
+    from:   tx.from,
+    nonce:  tx.nonce,
+  }))
+}
+
+fn event_hash(event) {
+  hashes.hash_str_bytes(str.concat(["FD_EVENT_V1", canon.canonical(event)]))
+}
+
+fn str_lt(a, b) {
+  str.lower(a) < str.lower(b)
+}
+
+fn str_compare(a, b) {
+  if a == b then 0
+  else if str_lt(a, b) then -1
+  else 1
+}
+
+fn sorted_strings(lst) {
+  list.sort_by(lst, fn(a, b) { str_compare(a, b) })
+}
+
+fn bps_reward(amount, bps) {
+  amount * bps / 10000
+}
+
+fn apply_deposit(objects_dir, state, dep) {
+  if dep.kind != "deposit"
+  then { err: "unsupported event kind: ${dep.kind}" }
+  else
+    let dep_id   = deposit_id(dep) in
+    let consumed = state.consumed_deposits in
+    if list.any(consumed, x => x == dep_id)
+    then { err: "deposit already consumed" }
+    else
+      let oracle_r = store.load_oracle_set(objects_dir, state.oracle_set_hash) in
+      if rec.has(oracle_r, "err")
+      then oracle_r
+      else
+        let oracles = oracle_r.ok.oracles in
+        if !list.any(oracles, o => o == dep.oracle_id)
+        then { err: "unauthorized oracle" }
+        else
+          let payload = deposit_signing_payload(dep) in
+          if !crypto.verify_ed25519(dep.oracle_id, payload, dep.signature)
+          then { err: "signature verification failed" }
+          else
+            let old       = rec.getOr(state.accounts, dep.beneficiary, { balance: 0, next_nonce: 0 }) in
+            let new_acc   = { balance: old.balance + dep.usd_cents, next_nonce: old.next_nonce } in
+            let accounts  = rec.set(state.accounts, dep.beneficiary, new_acc) in
+            let consumed2 = sorted_strings(list.append(consumed, dep_id)) in
+            { ok: { ...state, accounts: accounts, consumed_deposits: consumed2 } }
+}
+
+fn apply_transfer(objects_dir, state, tx) {
+  if tx.kind != "transfer"
+  then { err: "unsupported event kind: ${tx.kind}" }
+  else if tx.from == tx.to
+  then { err: "self transfer not allowed" }
+  else
+    let payload  = transfer_signing_payload(tx) in
+    if !crypto.verify_ed25519(tx.from, payload, tx.signature)
+    then { err: "signature verification failed" }
+    else
+      let from_acc = rec.getOr(state.accounts, tx.from, { balance: 0, next_nonce: 0 }) in
+      if from_acc.next_nonce != tx.nonce
+      then { err: "invalid nonce: expected ${from_acc.next_nonce} got ${tx.nonce}" }
+      else if from_acc.balance < tx.amount
+      then { err: "insufficient balance" }
+      else
+        let reg_r      = store.load_registry(objects_dir, state.merchant_registry_hash) in
+        let merchants  = if rec.has(reg_r, "err") then [] else reg_r.ok.merchants in
+        let is_merch   = list.any(merchants, m => m == tx.to) in
+        let rc         = state.reward_config in
+        let user_bps   = if is_merch then rc.user_spend_bps else rc.user_p2p_bps in
+        let vendor_bps = if is_merch then rc.vendor_spend_bps else 0 in
+        let sender_rebate  = bps_reward(tx.amount, user_bps) in
+        let merch_rebate   = bps_reward(tx.amount, vendor_bps) in
+        let total_reward   = sender_rebate + merch_rebate in
+        let treasury       = rc.treasury_account in
+        let treasury_acc   = rec.getOr(state.accounts, treasury, { balance: 0, next_nonce: 0 }) in
+        if treasury != "" && !rec.has(state.accounts, treasury)
+        then { err: "treasury account not found" }
+        else if treasury_acc.balance < total_reward
+        then { err: "insufficient treasury" }
+        else
+          let from_new  = { balance: from_acc.balance - tx.amount + sender_rebate, next_nonce: from_acc.next_nonce + 1 } in
+          let to_acc    = rec.getOr(state.accounts, tx.to, { balance: 0, next_nonce: 0 }) in
+          let to_new    = { balance: to_acc.balance + tx.amount + merch_rebate, next_nonce: to_acc.next_nonce } in
+          let treas_new = { balance: treasury_acc.balance - total_reward, next_nonce: treasury_acc.next_nonce } in
+          let accounts  = rec.set(state.accounts, tx.from, from_new) in
+          let accounts  = rec.set(accounts, tx.to, to_new) in
+          let accounts  = if total_reward > 0 then rec.set(accounts, treasury, treas_new) else accounts in
+          { ok: { ...state, accounts: accounts } }
+}
+
+fn apply_event(objects_dir, state, event) {
+  if event.kind == "deposit"
+  then apply_deposit(objects_dir, state, event)
+  else if event.kind == "transfer"
+  then apply_transfer(objects_dir, state, event)
+  else { err: "unsupported event kind: ${event.kind}" }
+}
+
+fn conflict_key(event) {
+  if event.kind == "deposit"
+  then deposit_id(event)
+  else transfer_conflict_key(event)
+}
+
+fn canonical_event_set(events) {
+  let winners = list.fold(events, {}, fn(acc, event) {
+    let ck       = conflict_key(event) in
+    let eh       = event_hash(event) in
+    let existing = rec.get(acc, ck) in
+    if existing == null
+    then rec.set(acc, ck, { hash: eh, event: event })
+    else if str_lt(eh, existing.hash)
+    then rec.set(acc, ck, { hash: eh, event: event })
+    else acc
+  }) in
+  let winner_list = list.map(rec.values(winners), w => w.event) in
+  let deposits    = list.filter(winner_list, e => e.kind == "deposit") in
+  let transfers   = list.filter(winner_list, e => e.kind == "transfer") in
+  let sorted_deps = list.sort_by(deposits, fn(a, b) {
+    let ka = str.concat([a.beneficiary, a.external_ref, event_hash(a)]) in
+    let kb = str.concat([b.beneficiary, b.external_ref, event_hash(b)]) in
+    str_compare(ka, kb)
+  }) in
+  let sorted_txs  = list.sort_by(transfers, fn(a, b) {
+    let ka = str.concat([a.from, str.from(a.nonce), event_hash(a)]) in
+    let kb = str.concat([b.from, str.from(b.nonce), event_hash(b)]) in
+    str_compare(ka, kb)
+  }) in
+  list.concat([sorted_deps, sorted_txs])
+}
+
+fn replay_events(objects_dir, genesis_state, events) {
+  let canonical = canonical_event_set(events) in
+  list.fold(canonical, { ok: genesis_state, receipts: [] }, fn(acc, event) {
+    if rec.has(acc, "err")
+    then acc
+    else
+      let r = apply_event(objects_dir, acc.ok, event) in
+      if rec.has(r, "err")
+      then { err: r.err }
+      else { ok: r.ok, receipts: list.append(acc.receipts, r.ok) }
+  })
+}
+
+export {
+  transfer_signing_payload, deposit_signing_payload,
+  deposit_id, transfer_conflict_key, event_hash,
+  apply_event, apply_deposit, apply_transfer,
+  canonical_event_set, replay_events
+}

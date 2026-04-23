@@ -1,0 +1,63 @@
+import("../lib/engine") as engine
+import("../lib/store")  as store
+import("../lib/hashes") as hashes
+import("../lib/canon")  as canon
+import("std/io")        as io
+import("std/json")      as json
+import("std/list")      as list
+import("std/str")       as str
+import("std/rec")       as rec
+
+let OBJECTS      = "/Users/g.bogans/Downloads/Fard Dinar/examples/objects"
+let GENESIS_PATH = "/Users/g.bogans/Downloads/Fard Dinar/examples/genesis_rewards.json"
+let EVENTS_PATH  = "/Users/g.bogans/Downloads/Fard Dinar/examples/events.json"
+
+let genesis_cfg = json.decode(io.read_file(GENESIS_PATH).ok)
+let genesis_state = {
+  accounts:               genesis_cfg.accounts,
+  consumed_deposits:      genesis_cfg.consumed_deposits,
+  merchant_registry_hash: genesis_cfg.merchant_registry_hash,
+  oracle_set_hash:        genesis_cfg.oracle_set_hash,
+  reward_config:          genesis_cfg.reward_config,
+}
+let events = json.decode(io.read_file(EVENTS_PATH).ok)
+
+test "store loads oracle set" {
+  let r = store.load_oracle_set(OBJECTS, genesis_state.oracle_set_hash)
+  !rec.has(r, "err") && list.len(r.ok.oracles) == 1
+}
+
+test "store loads merchant registry" {
+  let r = store.load_registry(OBJECTS, genesis_state.merchant_registry_hash)
+  !rec.has(r, "err") && list.len(r.ok.merchants) == 1
+}
+
+test "event_hash produces ahd1024 tag" {
+  str.starts_with(engine.event_hash(list.get(events, 0)), "ahd1024:")
+}
+
+test "canonical_event_set deduplicates conflicts" {
+  list.len(engine.canonical_event_set(events)) == 4
+}
+
+test "canonical_event_set deposits before transfers" {
+  let canonical = engine.canonical_event_set(events) in
+  let first = list.get(canonical, 0) in
+  let last  = list.get(canonical, list.len(canonical) - 1) in
+  first.kind == "deposit" && last.kind == "transfer"
+}
+
+test "replay produces correct supply" {
+  let result = engine.replay_events(OBJECTS, genesis_state, events) in
+  let supply = list.fold(
+    list.map(rec.values(result.ok.accounts), a => a.balance),
+    0,
+    fn(acc, b) { acc + b }
+  ) in
+  !rec.has(result, "err") && supply == 100012500
+}
+
+test "replay final state hash matches rust" {
+  let result = engine.replay_events(OBJECTS, genesis_state, events) in
+  hashes.hash_str_bytes(canon.canonical(result.ok)) == "ahd1024:b350cffb0febf82ac766fd985a7b9706ec5ff67dd5949faa92ffb5b6530b4f28"
+}

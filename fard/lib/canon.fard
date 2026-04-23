@@ -1,0 +1,7 @@
+import("std/json") as json
+
+fn canonical(value) {
+  json.canonicalize(value)
+}
+
+export { canonical }

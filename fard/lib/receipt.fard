@@ -1,0 +1,26 @@
+import("./hashes") as hashes
+import("./canon")  as canon
+import("std/str")  as str
+
+fn build_receipt(program_hash, event, pre_state, post_state) {
+  let input_hash      = hashes.hash_str_bytes(str.concat(["FD_EVENT_V1", canon.canonical(event)])) in
+  let pre_state_hash  = hashes.hash_str_bytes(canon.canonical(pre_state)) in
+  let post_state_hash = hashes.hash_str_bytes(canon.canonical(post_state)) in
+  let trace           = canon.canonical({
+    program_hash:  program_hash,
+    event:         event,
+    pre_state:     pre_state,
+    post_state:    post_state,
+  }) in
+  let trace_hash = hashes.hash_str_bytes(trace) in
+  {
+    run_id:          trace_hash,
+    program_hash:    program_hash,
+    input_hash:      input_hash,
+    pre_state_hash:  pre_state_hash,
+    post_state_hash: post_state_hash,
+    trace_hash:      trace_hash,
+  }
+}
+
+export { build_receipt }

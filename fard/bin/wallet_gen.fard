@@ -1,0 +1,26 @@
+import("../lib/args") as args
+import("std/env")     as env
+import("std/io")      as io
+import("std/json")    as json
+import("std/rec")     as rec
+import("std/uuid")    as uuid
+import("std/crypto")  as crypto
+import("std/bytes")   as bytes
+import("std/str")     as str
+
+fn main() {
+  let argv    = args.get_program_args(env.args()) in
+  let out_path = args.require_flag(argv, "--out") in
+  if rec.has(out_path, "err") then out_path
+  else
+    // Generate 32 random bytes via uuid v4 (128 bits) twice, take first 32 bytes
+    let u1 = str.replace(uuid.v4(), "-", "") in
+    let u2 = str.replace(uuid.v4(), "-", "") in
+    let secret_hex = str.concat([u1, u2]) in
+    let secret_hex = str.slice(secret_hex, 0, 64) in
+    let wallet = { secret_key_hex: secret_hex } in
+    let _ = io.write_file(out_path.ok, json.encode(wallet)) in
+    { secret_key_hex: secret_hex, note: "public key derivation requires ed25519 keygen — use wallet_show to display pubkey" }
+}
+
+main()

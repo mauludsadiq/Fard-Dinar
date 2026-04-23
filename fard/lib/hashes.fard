@@ -1,0 +1,35 @@
+import("std/process") as process
+import("std/str")     as str
+import("std/bytes")   as bytes
+
+let AHD_BIN = "/Users/g.bogans/Downloads/AHD_1024/target/release/ahd_1024"
+
+fn hash_text(text) {
+  let r = process.capture(AHD_BIN, ["hash", text])
+  let raw = str.trim(r.stdout)
+  let hex = str.slice(raw, 13, str.len(raw))
+  "ahd1024:${hex}"
+}
+
+fn hash_bytes(bs) {
+  let hex_input = bytes.to_hex(bs)
+  let r = process.capture(AHD_BIN, ["hash-hex", hex_input])
+  let raw = str.trim(r.stdout)
+  let hex = str.slice(raw, 13, str.len(raw))
+  "ahd1024:${hex}"
+}
+
+fn hash_str_bytes(text) {
+  hash_bytes(bytes.from_string(text))
+}
+
+fn hex_of(tagged) {
+  let colon = str.index_of(tagged, ":")
+  str.slice(tagged, colon + 1, str.len(tagged))
+}
+
+fn valid_tagged_hash(text) {
+  str.starts_with(text, "ahd1024:") && str.len(text) == 72
+}
+
+export { hash_text, hash_bytes, hash_str_bytes, hex_of, valid_tagged_hash }

@@ -1,0 +1,19 @@
+import("../lib/engine") as engine
+import("../lib/args")   as args
+import("std/env")       as env
+import("std/io")        as io
+import("std/json")      as json
+import("std/list")      as list
+import("std/rec")       as rec
+
+fn main() {
+  let argv       = args.get_program_args(env.args()) in
+  let events_path = args.require_flag(argv, "--events") in
+  if rec.has(events_path, "err") then events_path
+  else
+    let events    = json.decode(io.read_file(events_path.ok).ok) in
+    let canonical = engine.canonical_event_set(events) in
+    { ok: true, canonical_event_count: list.len(canonical) }
+}
+
+main()

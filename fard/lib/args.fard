@@ -1,0 +1,28 @@
+import("std/list") as list
+
+fn get_program_args(all_args) {
+  let sep = list.find_index(all_args, x => x == "--")
+  if sep == -1
+  then []
+  else list.drop(all_args, sep + 1)
+}
+
+fn get_flag(args, name) {
+  let idx = list.find_index(args, x => x == name)
+  if idx == -1
+  then null
+  else list.get(args, idx + 1)
+}
+
+fn flag_present(args, name) {
+  list.find_index(args, x => x == name) != -1
+}
+
+fn require_flag(args, name) {
+  let v = get_flag(args, name)
+  if v == null
+  then { err: "missing required flag: ${name}" }
+  else { ok: v }
+}
+
+export { get_program_args, get_flag, flag_present, require_flag }

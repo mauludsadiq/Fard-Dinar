@@ -1,0 +1,29 @@
+import("std/crypto") as crypto
+import("std/bytes")  as bytes
+import("std/str")    as str
+
+// Sign msg_bytes with secret key hex — returns hex signature
+fn sign_ed25519(sk_hex, msg_bytes) {
+  let msg_hex = bytes.to_hex(msg_bytes)
+  crypto.ed25519_sign(sk_hex, msg_hex)
+}
+
+// Verify Ed25519 signature
+fn verify_ed25519(pk_hex, msg_bytes, sig_hex) {
+  let msg_hex = bytes.to_hex(msg_bytes)
+  crypto.ed25519_verify(pk_hex, msg_hex, sig_hex)
+}
+
+fn public_key(sk_hex) {
+  crypto.ed25519_public_key(sk_hex)
+}
+
+fn valid_pubkey(hex) {
+  str.len(hex) == 64
+}
+
+fn valid_signature(hex) {
+  str.len(hex) == 128
+}
+
+export { sign_ed25519, verify_ed25519, public_key, valid_pubkey, valid_signature }

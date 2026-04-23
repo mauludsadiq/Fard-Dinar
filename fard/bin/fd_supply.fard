@@ -1,0 +1,21 @@
+import("../lib/args") as args
+import("std/env")     as env
+import("std/io")      as io
+import("std/json")    as json
+import("std/list")    as list
+import("std/rec")     as rec
+
+fn main() {
+  let argv       = args.get_program_args(env.args()) in
+  let state_path = args.require_flag(argv, "--state") in
+  if rec.has(state_path, "err") then state_path
+  else
+    let state  = json.decode(io.read_file(state_path.ok).ok) in
+    let supply = list.fold(
+      list.map(rec.values(state.accounts), a => a.balance),
+      0, fn(acc, b) { acc + b }
+    ) in
+    { total_supply: supply, accounts: list.len(rec.keys(state.accounts)) }
+}
+
+main()

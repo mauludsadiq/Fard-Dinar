@@ -1,0 +1,44 @@
+import("std/io")   as io
+import("std/json") as json
+import("std/str")  as str
+import("std/rec")  as rec
+import("./hashes") as hashes
+import("./canon")  as canon
+
+fn load_object(objects_dir, tagged_hash) {
+  let colon = str.index_of(tagged_hash, ":") in
+  let tag   = str.slice(tagged_hash, 0, colon) in
+  let hex   = str.slice(tagged_hash, colon + 1, str.len(tagged_hash)) in
+  if tag != "ahd1024"
+  then { err: "invalid hash tag: ${tag}" }
+  else
+    let path   = "${objects_dir}/${hex}" in
+    let exists = io.file_exists(path) in
+    if !exists
+    then { err: "object not found: ${tagged_hash}" }
+    else
+      let raw    = io.read_file(path) in
+      let bytes  = raw.ok in
+      let actual = hashes.hash_str_bytes(bytes) in
+      if actual != tagged_hash
+      then { err: "hash mismatch: expected ${tagged_hash} got ${actual}" }
+      else
+        let parsed  = json.decode(bytes) in
+        let recanon = canon.canonical(parsed) in
+        let rechash = hashes.hash_str_bytes(recanon) in
+        if rechash != tagged_hash
+        then { err: "canonical mismatch for ${tagged_hash}" }
+        else { ok: parsed }
+}
+
+fn load_registry(objects_dir, tagged_hash) {
+  let r = load_object(objects_dir, tagged_hash) in
+  if rec.has(r, "err") then r else { ok: r.ok }
+}
+
+fn load_oracle_set(objects_dir, tagged_hash) {
+  let r = load_object(objects_dir, tagged_hash) in
+  if rec.has(r, "err") then r else { ok: r.ok }
+}
+
+export { load_object, load_registry, load_oracle_set }

@@ -1,0 +1,38 @@
+import("../lib/args") as args
+import("std/env")     as env
+import("std/io")      as io
+import("std/json")    as json
+import("std/list")    as list
+import("std/rec")     as rec
+
+fn main() {
+  let argv    = args.get_program_args(env.args()) in
+  let old_path = args.require_flag(argv, "--old") in
+  let new_path = args.require_flag(argv, "--new") in
+  if rec.has(old_path, "err") then old_path
+  else if rec.has(new_path, "err") then new_path
+  else
+    let old_state = json.decode(io.read_file(old_path.ok).ok) in
+    let new_state = json.decode(io.read_file(new_path.ok).ok) in
+    let old_keys  = rec.keys(old_state.accounts) in
+    let new_keys  = rec.keys(new_state.accounts) in
+    let all_keys  = list.dedupe(list.concat([old_keys, new_keys])) in
+    let changes   = list.filter(
+      list.map(all_keys, fn(k) {
+        let old_acc = rec.getOr(old_state.accounts, k, { balance: 0, next_nonce: 0 }) in
+        let new_acc = rec.getOr(new_state.accounts, k, { balance: 0, next_nonce: 0 }) in
+        let in_old  = list.any(old_keys, x => x == k) in
+        let in_new  = list.any(new_keys, x => x == k) in
+        if !in_old && in_new then { key: k, change: "added",   old_balance: 0,               new_balance: new_acc.balance }
+        else if in_old && !in_new then { key: k, change: "removed", old_balance: old_acc.balance, new_balance: 0 }
+        else if old_acc.balance != new_acc.balance then { key: k, change: "modified", old_balance: old_acc.balance, new_balance: new_acc.balance }
+        else { key: k, change: "unchanged", old_balance: old_acc.balance, new_balance: new_acc.balance }
+      }),
+      c => c.change != "unchanged"
+    ) in
+    let old_supply = list.fold(list.map(rec.values(old_state.accounts), a => a.balance), 0, fn(a,b) { a+b }) in
+    let new_supply = list.fold(list.map(rec.values(new_state.accounts), a => a.balance), 0, fn(a,b) { a+b }) in
+    { changes: changes, old_supply: old_supply, new_supply: new_supply, supply_delta: new_supply - old_supply }
+}
+
+main()
