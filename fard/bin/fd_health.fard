@@ -1,0 +1,101 @@
+import("../lib/hashes") as hashes
+import("../lib/canon")  as canon
+import("../lib/args")   as args
+import("std/env")       as env
+import("std/io")        as io
+import("std/json")      as json
+import("std/list")      as list
+import("std/rec")       as rec
+import("std/str")       as str
+import("std/http")      as http
+
+fn query_node(url) {
+  let info_r  = http.get(str.concat([url, "/v1/info"])) in
+  let state_r = http.get(str.concat([url, "/v1/state"])) in
+  if info_r.status != 200
+  then { ok: false, url: url, role: "node", err: "unreachable" }
+  else if state_r.status != 200
+  then { ok: false, url: url, role: "node", err: "state unreachable" }
+  else
+    let state        = json.decode(state_r.body) in
+    let rc           = state.reward_config in
+    let treasury     = rc.treasury_account in
+    let treas_bal    = rec.getOr(state.accounts, treasury, { balance: 0, next_nonce: 0 }).balance in
+    let total_supply = list.fold(rec.values(state.accounts), 0, fn(acc, a) { acc + a.balance }) in
+    let state_hash   = hashes.hash_str_bytes(canon.canonical(state)) in
+    let acct_count   = list.len(rec.keys(state.accounts)) in
+    let dep_count    = list.len(state.consumed_deposits) in
+    {
+      ok:                true,
+      url:               url,
+      role:              "node",
+      state_hash:        state_hash,
+      total_supply:      total_supply,
+      account_count:     acct_count,
+      deposit_count:     dep_count,
+      treasury_account:  treasury,
+      treasury_balance:  treas_bal,
+      reward_config:     rc,
+    }
+}
+
+fn query_registry(url) {
+  let info_r = http.get(str.concat([url, "/v1/info"])) in
+  let reg_r  = http.get(str.concat([url, "/v1/registry"])) in
+  if info_r.status != 200
+  then { ok: false, url: url, role: "registry", err: "unreachable" }
+  else if reg_r.status != 200
+  then { ok: false, url: url, role: "registry", err: "registry unreachable" }
+  else
+    let registry    = json.decode(reg_r.body) in
+    let entry_count = list.len(rec.keys(registry.entries)) in
+    let reg_hash    = hashes.hash_str_bytes(canon.canonical(registry)) in
+    {
+      ok:          true,
+      url:         url,
+      role:        "registry",
+      registry_hash: reg_hash,
+      entry_count: entry_count,
+    }
+}
+
+fn check_convergence(nodes) {
+  let hashes_list = list.flat_map(nodes, fn(n) {
+    if rec.has(n, "state_hash") then [n.state_hash] else []
+  }) in
+  if list.len(hashes_list) == 0 then { converged: true, state_hash: null }
+  else
+    let first = list.get(hashes_list, 0) in
+    let all_same = list.all(hashes_list, h => h == first) in
+    { converged: all_same, state_hash: first }
+}
+
+fn main() {
+  let argv       = args.get_program_args(env.args()) in
+  let nodes_flag = args.get_flag(argv, "--nodes") in
+  let regs_flag  = args.get_flag(argv, "--registries") in
+  let node_url   = args.get_flag(argv, "--node") in
+  let reg_url    = args.get_flag(argv, "--registry") in
+  let node_urls  = if nodes_flag != null
+                   then str.split(nodes_flag, ",")
+                   else if node_url != null then [node_url] else [] in
+  let reg_urls   = if regs_flag != null
+                   then str.split(regs_flag, ",")
+                   else if reg_url != null then [reg_url] else [] in
+  if list.len(node_urls) == 0 && list.len(reg_urls) == 0
+  then { err: "provide --node, --nodes, --registry, or --registries" }
+  else
+    let node_results = list.map(node_urls, fn(url) { query_node(url) }) in
+    let reg_results  = list.map(reg_urls,  fn(url) { query_registry(url) }) in
+    let convergence  = check_convergence(node_results) in
+    let all_ok       = list.all(list.concat([node_results, reg_results]), r => r.ok) in
+    {
+      ok:           all_ok,
+      converged:    convergence.converged,
+      state_hash:   convergence.state_hash,
+      nodes:        node_results,
+      registries:   reg_results,
+    }
+}
+
+main()

@@ -1,0 +1,94 @@
+import("../lib/args") as args
+import("../lib/canon") as canon
+import("../lib/hashes") as hashes
+import("std/env")  as env
+import("std/io")   as io
+import("std/json") as json
+import("std/list") as list
+import("std/rec")  as rec
+import("std/str")  as str
+import("std/http") as http
+
+fn query_node(url) {
+  let r = http.get(str.concat([url, "/v1/state"])) in
+  if r.status != 200
+  then { ok: false, url: url, err: "unreachable" }
+  else
+    let state = json.decode(r.body) in
+    let rc    = state.reward_config in
+    let tbal  = rec.getOr(state.accounts, rc.treasury_account, { balance: 0, next_nonce: 0 }).balance in
+    let supply = list.fold(rec.values(state.accounts), 0, fn(a, b) { a + b.balance }) in
+    {
+      ok:               true,
+      url:              url,
+      state_hash:       hashes.hash_str_bytes(canon.canonical(state)),
+      total_supply:     supply,
+      account_count:    list.len(rec.keys(state.accounts)),
+      deposit_count:    list.len(state.consumed_deposits),
+      treasury_balance: tbal,
+    }
+}
+
+fn query_registry(url) {
+  let r = http.get(str.concat([url, "/v1/registry"])) in
+  if r.status != 200
+  then { ok: false, url: url, err: "unreachable" }
+  else
+    let reg = json.decode(r.body) in
+    {
+      ok:            true,
+      url:           url,
+      registry_hash: hashes.hash_str_bytes(canon.canonical(reg)),
+      entry_count:   list.len(rec.keys(reg.entries)),
+    }
+}
+
+fn main() {
+  let argv      = args.get_program_args(env.args()) in
+  let topology  = args.get_flag(argv, "--topology") in
+  let nodes_s   = args.get_flag(argv, "--nodes") in
+  let regs_s    = args.get_flag(argv, "--registries") in
+  let node_urls = if topology != null
+    then
+      let t = json.decode(io.read_file(topology).ok) in
+      t.nodes
+    else if nodes_s != null then str.split(nodes_s, ",")
+    else [] in
+  let reg_urls  = if topology != null
+    then
+      let t = json.decode(io.read_file(topology).ok) in
+      t.registries
+    else if regs_s != null then str.split(regs_s, ",")
+    else [] in
+  let node_results = list.map(node_urls, fn(url) { query_node(url) }) in
+  let reg_results  = list.map(reg_urls,  fn(url) { query_registry(url) }) in
+  let ok_nodes     = list.filter(node_results, n => n.ok) in
+  let ok_regs      = list.filter(reg_results,  r => r.ok) in
+  let state_hashes = list.map(ok_nodes, n => n.state_hash) in
+  let reg_hashes   = list.map(ok_regs,  r => r.registry_hash) in
+  let nodes_converged = if list.len(state_hashes) == 0 then true
+    else
+      let first = list.get(state_hashes, 0) in
+      list.all(state_hashes, h => h == first) in
+  let regs_converged = if list.len(reg_hashes) == 0 then true
+    else
+      let first = list.get(reg_hashes, 0) in
+      list.all(reg_hashes, h => h == first) in
+  let all_ok = list.all(list.concat([node_results, reg_results]), r => r.ok) in
+  {
+    ok:                all_ok,
+    nodes_converged:   nodes_converged,
+    registries_converged: regs_converged,
+    fully_converged:   nodes_converged && regs_converged,
+    node_count:        list.len(node_results),
+    registry_count:    list.len(reg_results),
+    reachable_nodes:   list.len(ok_nodes),
+    reachable_registries: list.len(ok_regs),
+    state_hash:        if list.len(state_hashes) > 0 then list.get(state_hashes, 0) else null,
+    registry_hash:     if list.len(reg_hashes) > 0 then list.get(reg_hashes, 0) else null,
+    nodes:             node_results,
+    registries:        reg_results,
+  }
+}
+
+main()

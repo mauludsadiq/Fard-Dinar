@@ -1,0 +1,5 @@
+{
+  "name": "single-node",
+  "nodes":      ["http://127.0.0.1:7370"],
+  "registries": ["http://127.0.0.1:7371"]
+}

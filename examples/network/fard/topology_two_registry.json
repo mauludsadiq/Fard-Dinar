@@ -1,0 +1,5 @@
+{
+  "name": "two-registry-one-node",
+  "nodes":      ["http://127.0.0.1:7372"],
+  "registries": ["http://127.0.0.1:7371", "http://127.0.0.1:7373"]
+}
